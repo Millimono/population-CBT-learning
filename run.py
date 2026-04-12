@@ -96,7 +96,18 @@ if __name__ == "__main__":
     best_pop     = None
     best_history = None
 
+    # print("=== ÉVALUATION SUR 5 SEEDS ===\n")
+
+    import time
+
+    # ============================================================
+    # Dans la boucle seeds — mesurer le temps
+    # ============================================================
     print("=== ÉVALUATION SUR 5 SEEDS ===\n")
+
+    train_times = []
+
+
 
     for seed in SEEDS:
         set_seed(seed)
@@ -104,6 +115,9 @@ if __name__ == "__main__":
         train_images, train_labels, val_images, val_labels = load_ddsm(
             TRAIN_DIR, VAL_DIR
         )
+
+        start_time = time.time()  # ← début chrono
+
 
         acc, pop, trainer, history = run_experiment(
             train_images, train_labels,
@@ -118,8 +132,13 @@ if __name__ == "__main__":
             device      = DEVICE
         )
 
+        elapsed = time.time() - start_time  # ← fin chrono
+        train_times.append(elapsed)
+
         accs.append(acc)
-        print(f"Seed {seed:5d} → {acc:.4f}\n")
+        # print(f"Seed {seed:5d} → {acc:.4f}\n")
+        print(f"Seed {seed:5d} → Acc: {acc:.4f} | Temps: {elapsed:.1f}s\n")
+
 
         # Garder le meilleur run pour les figures
         if acc > best_acc:
@@ -138,7 +157,12 @@ if __name__ == "__main__":
     print(f"  Std       : {np.std(accs):.4f}")
     print(f"  Min       : {np.min(accs):.4f}")
     print(f"  Max       : {np.max(accs):.4f}")
+  
+    print(f"  Accuracy  : {np.mean(accs):.4f} ± {np.std(accs):.4f}")
+    print(f"  Temps     : {np.mean(train_times):.1f}s ± {np.std(train_times):.1f}s")
+    print(f"  Temps/run : {np.mean(train_times)/60:.1f} min")
     print(f"{'='*40}")
+
 
     # ============================================================
     # Figures — basées sur le meilleur run
