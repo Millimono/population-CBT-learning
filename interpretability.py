@@ -89,7 +89,7 @@ def explain_prediction(pop, img, label, class_names, patch_size, device):
     axes[2].grid(True, axis="y", alpha=0.3)
 
     plt.suptitle(
-        f"Explication de la décision — {'✅ Correct' if pred == label else '❌ Incorrect'}",
+        f"Explication de la décision — {'[OK] Correct' if pred == label else '[ERREUR] Incorrect'}",
         fontsize=13)
     plt.tight_layout()
     return fig
@@ -177,7 +177,7 @@ def plot_interpretability_examples(pop, val_images, val_labels,
         # Heatmap
         all_axes[row][1].imshow(img.numpy(), cmap="gray", alpha=0.5)
         all_axes[row][1].imshow(heatmap, cmap="hot", alpha=0.5)
-        status = "✅" if pred == label else "❌"
+        status = "[OK]" if pred == label else "[ERREUR]"
         all_axes[row][1].set_title(
             f"{status} Prédit : {class_names[pred]}", fontsize=10)
         all_axes[row][1].axis("off")
@@ -196,4 +196,4 @@ def plot_interpretability_examples(pop, val_images, val_labels,
     plt.tight_layout()
     plt.savefig(save_path, bbox_inches="tight", dpi=150)
     plt.close()
-    print(f"✅ Figure interprétabilité : {save_path}")
+    print(f"[OK] Figure interprétabilité : {save_path}")
