@@ -13,8 +13,12 @@ from train import run_experiment
 # ============================================================
 # CONFIG
 # ============================================================
-TRAIN_DIR   = "data/miniddsm/train"
-VAL_DIR     = "data/miniddsm/val"
+# TRAIN_DIR   = "data/miniddsm/train"
+# VAL_DIR     = "data/miniddsm/val"
+
+TRAIN_DIR   = "/content/PhD_AI_Grad_CAM_CAS_1_BAselines/miniddsm/train"
+VAL_DIR     = "/content/PhD_AI_Grad_CAM_CAS_1_BAselines/miniddsm/val"
+
 DEVICE      = "cuda" if torch.cuda.is_available() else "cpu"
 NUM_CLASSES = 2
 EPOCHS      = 40
