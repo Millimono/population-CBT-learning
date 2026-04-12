@@ -5,20 +5,16 @@
 import torch
 import gc
 import os
+import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 from data  import load_ddsm
 from train import run_experiment
-
+from baselines import run_baselines
 # ============================================================
 # CONFIG
 # ============================================================
-# TRAIN_DIR   = "data/miniddsm/train"
-# VAL_DIR     = "data/miniddsm/val"
-
 TRAIN_DIR   = "/content/PhD_AI_Grad_CAM_CAS_1_BAselines/miniddsm/train"
 VAL_DIR     = "/content/PhD_AI_Grad_CAM_CAS_1_BAselines/miniddsm/val"
-
 DEVICE      = "cuda" if torch.cuda.is_available() else "cpu"
 NUM_CLASSES = 2
 EPOCHS      = 40
@@ -26,11 +22,11 @@ LR          = 0.1
 NUM_CELLS   = 1600
 PATCH_SIZE  = (5, 5)
 THETA_INIT  = 0.5
-SEED        = 42
+SEEDS       = [42, 123, 456, 789, 1024]
 
 # ============================================================
-def set_seed(seed=42):
-    import random, numpy as np
+def set_seed(seed):
+    import random
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)
@@ -38,16 +34,12 @@ def set_seed(seed=42):
     torch.backends.cudnn.deterministic = True
 
 
-def plot_learning_curve(history, name, oracle_acc, save_path):
+def plot_learning_curve(history, name, save_path):
     fig, ax = plt.subplots(figsize=(8, 5))
     epochs  = range(1, len(history) + 1)
-
     ax.plot(epochs, history, color="#2196F3", linewidth=2, label="Notre méthode")
-    ax.axhline(y=oracle_acc, color="red", linestyle="--",
-               linewidth=1.5, label=f"Oracle kNN ({oracle_acc:.2%})")
     ax.axhline(y=max(history), color="#2196F3", linestyle=":",
                linewidth=1.5, label=f"Best ({max(history):.2%})")
-
     ax.set_xlabel("Epoch", fontsize=12)
     ax.set_ylabel("Accuracy (validation)", fontsize=12)
     ax.set_title(name, fontsize=13)
@@ -55,11 +47,10 @@ def plot_learning_curve(history, name, oracle_acc, save_path):
     ax.set_ylim(0.3, 1.0)
     ax.set_xlim(1, len(history))
     ax.grid(True, alpha=0.3)
-
     plt.tight_layout()
     plt.savefig(save_path, bbox_inches="tight", dpi=150)
     plt.close()
-    print(f"✅ Figure sauvegardée : {save_path}")
+    print(f"✅ Courbe sauvegardée : {save_path}")
 
 
 def plot_prototypes(pop, class_names, patch_size, save_path, n_proto=12):
@@ -67,14 +58,12 @@ def plot_prototypes(pop, class_names, patch_size, save_path, n_proto=12):
         len(class_names), n_proto,
         figsize=(n_proto * 1.2, len(class_names) * 1.4)
     )
-
     for c, cls_name in enumerate(class_names):
         mask     = (pop.proto_class == c)
         protos_c = pop.prototypes[mask].cpu().detach()
         norms    = protos_c.norm(dim=1)
         top_idx  = norms.argsort(descending=True)[:n_proto]
         protos_c = protos_c[top_idx]
-
         for j in range(n_proto):
             ax = axes[c][j] if len(class_names) > 1 else axes[j]
             if j < len(protos_c):
@@ -82,70 +71,115 @@ def plot_prototypes(pop, class_names, patch_size, save_path, n_proto=12):
                 patch = (patch - patch.min()) / (patch.max() - patch.min() + 1e-6)
                 ax.imshow(patch, cmap="viridis", vmin=0, vmax=1)
             ax.axis("off")
-
         axes[c][0].set_ylabel(cls_name, fontsize=11,
                               rotation=90, labelpad=10, va="center")
-
     plt.suptitle("Prototypes appris par classe", fontsize=13)
     plt.tight_layout()
     plt.savefig(save_path, bbox_inches="tight", dpi=150)
     plt.close()
-    print(f"✅ Figure sauvegardée : {save_path}")
+    print(f"✅ Prototypes sauvegardés : {save_path}")
 
 
 # ============================================================
 if __name__ == "__main__":
 
-    set_seed(SEED)
     torch.cuda.empty_cache()
     gc.collect()
     os.makedirs("figs", exist_ok=True)
     print(f"Device: {DEVICE}")
 
-    # Charger les données
-    train_images, train_labels, val_images, val_labels = load_ddsm(
-        TRAIN_DIR, VAL_DIR
-    )
+    # ============================================================
+    # Évaluation sur 5 seeds
+    # ============================================================
+    accs         = []
+    best_acc     = 0.0
+    best_pop     = None
+    best_history = None
 
-    # Entraîner
-    acc, pop, trainer, history = run_experiment(
-        train_images, train_labels,
-        val_images,   val_labels,
-        name        = "MiniDDSM — K=1, patch=5x5, theta=0.5",
-        num_classes = NUM_CLASSES,
-        epochs      = EPOCHS,
-        lr          = LR,
-        num_cells   = NUM_CELLS,
-        patch_size  = PATCH_SIZE,
-        theta_init  = THETA_INIT,
-        device      = DEVICE
-    )
+    print("=== ÉVALUATION SUR 5 SEEDS ===\n")
 
-    print(f"\nRésultat final : {acc:.4f}")
+    for seed in SEEDS:
+        set_seed(seed)
+
+        train_images, train_labels, val_images, val_labels = load_ddsm(
+            TRAIN_DIR, VAL_DIR
+        )
+
+        acc, pop, trainer, history = run_experiment(
+            train_images, train_labels,
+            val_images,   val_labels,
+            name        = f"MiniDDSM — seed={seed}",
+            num_classes = NUM_CLASSES,
+            epochs      = EPOCHS,
+            lr          = LR,
+            num_cells   = NUM_CELLS,
+            patch_size  = PATCH_SIZE,
+            theta_init  = THETA_INIT,
+            device      = DEVICE
+        )
+
+        accs.append(acc)
+        print(f"Seed {seed:5d} → {acc:.4f}\n")
+
+        # Garder le meilleur run pour les figures
+        if acc > best_acc:
+            best_acc     = acc
+            best_pop     = pop
+            best_history = history
 
     # ============================================================
-    # Générer les figures
+    # Résumé
     # ============================================================
+    print(f"{'='*40}")
+    print(f"RÉSUMÉ SUR 5 SEEDS — MiniDDSM")
+    print(f"{'='*40}")
+    print(f"  Résultats : {[f'{a:.4f}' for a in accs]}")
+    print(f"  Moyenne   : {np.mean(accs):.4f}")
+    print(f"  Std       : {np.std(accs):.4f}")
+    print(f"  Min       : {np.min(accs):.4f}")
+    print(f"  Max       : {np.max(accs):.4f}")
+    print(f"{'='*40}")
 
-    # Figure 1 — Courbe d'apprentissage
+    # ============================================================
+    # Figures — basées sur le meilleur run
+    # ============================================================
     plot_learning_curve(
-        history    = history,
-        name       = "MiniDDSM — Cancer vs Normal",
-        oracle_acc = 0.7779,
-        save_path  = "figs/learning_curve_ddsm.png"
+        history   = best_history,
+        name      = f"MiniDDSM — Cancer vs Normal (best={best_acc:.2%})",
+        save_path = "figs/learning_curve_ddsm.png"
     )
 
-    # Figure 2 — Prototypes par classe
     plot_prototypes(
-        pop         = pop,
+        pop         = best_pop,
         class_names = ["Cancer", "Normal"],
         patch_size  = PATCH_SIZE[0],
         save_path   = "figs/prototypes_ddsm.png"
     )
 
+    
+    baseline_results = run_baselines(
+        train_images, train_labels,
+        val_images,   val_labels
+    )
+
     print("\n✅ Toutes les figures générées dans figs/")
     print(f"{'='*50}")
     print(f"RÉSUMÉ FINAL")
-    print(f"  Accuracy : {acc:.4f}")
-    print(f"  Figures  : figs/")
+    print(f"  Moyenne ± Std : {np.mean(accs):.4f} ± {np.std(accs):.4f}")
+    print(f"  Figures       : figs/")
     print(f"{'='*50}")
+
+
+    import os
+    from interpretability import plot_interpretability_examples
+
+    plot_interpretability_examples(
+        pop         = best_pop,
+        val_images  = val_images,
+        val_labels  = val_labels,
+        class_names = ["Cancer", "Normal"],
+        patch_size  = PATCH_SIZE[0],
+        device      = DEVICE,
+        save_path   = "figs/interpretability_ddsm.png",
+        n_examples  = 4
+    )
