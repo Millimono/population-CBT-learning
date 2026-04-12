@@ -10,6 +10,9 @@ import matplotlib.pyplot as plt
 from data  import load_ddsm
 from train import run_experiment
 from baselines import run_baselines
+
+from interpretability import plot_interpretability_examples
+
 # ============================================================
 # CONFIG
 # ============================================================
@@ -34,6 +37,24 @@ def set_seed(seed):
     torch.backends.cudnn.deterministic = True
 
 
+# def plot_learning_curve(history, name, save_path):
+#     fig, ax = plt.subplots(figsize=(8, 5))
+#     epochs  = range(1, len(history) + 1)
+#     ax.plot(epochs, history, color="#2196F3", linewidth=2, label="Notre méthode")
+#     ax.axhline(y=max(history), color="#2196F3", linestyle=":",
+#                linewidth=1.5, label=f"Best ({max(history):.2%})")
+#     ax.set_xlabel("Epoch", fontsize=12)
+#     ax.set_ylabel("Accuracy (validation)", fontsize=12)
+#     ax.set_title(name, fontsize=13)
+#     ax.legend(fontsize=10)
+#     ax.set_ylim(0.3, 1.0)
+#     ax.set_xlim(1, len(history))
+#     ax.grid(True, alpha=0.3)
+#     plt.tight_layout()
+#     plt.savefig(save_path, bbox_inches="tight", dpi=150)
+#     plt.close()
+#     print(f"✅ Courbe sauvegardée : {save_path}")
+
 def plot_learning_curve(history, name, save_path):
     fig, ax = plt.subplots(figsize=(8, 5))
     epochs  = range(1, len(history) + 1)
@@ -45,7 +66,9 @@ def plot_learning_curve(history, name, save_path):
     ax.set_title(name, fontsize=13)
     ax.legend(fontsize=10)
     ax.set_ylim(0.3, 1.0)
-    ax.set_xlim(1, len(history))
+    # ✅ Fix warning xlim
+    if len(history) > 1:
+        ax.set_xlim(1, len(history))
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.savefig(save_path, bbox_inches="tight", dpi=150)

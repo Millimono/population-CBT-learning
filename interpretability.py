@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
 
+import os
 
 def explain_prediction(pop, img, label, class_names, patch_size, device):
     """
