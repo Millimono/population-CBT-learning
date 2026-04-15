@@ -8,7 +8,7 @@ import torch.nn.functional as F
 
 class PopulationBFastExact:
     def __init__(self, num_cells=1600, patch_size=(5, 5),
-                 theta_init=0.5, beta=5.0, num_classes=2, device="cuda"):
+                 theta_init=0.5, beta=5.0, num_classes=2, device="cuda" ,K=1):
         self.device      = device
         self.B           = num_cells
         self.patch_size  = patch_size
@@ -16,6 +16,7 @@ class PopulationBFastExact:
         self.beta        = beta
         self.theta_init  = theta_init
         self.num_classes = num_classes
+        self.K           = K  # ← stocké ici
 
         self.prototypes   = torch.randn(self.B, self.D, device=device) * 0.1
         self.proto_class  = torch.full((self.B,), -1, dtype=torch.long, device=device)
@@ -44,7 +45,8 @@ class PopulationBFastExact:
         dot        = torch.einsum("npd,bd->nbp", patches_std, protos)
         dists_sq   = (patches_sq.unsqueeze(1) + protos_sq.view(1, B, 1) - 2 * dot).clamp(min=0)
 
-        K = 1  # optimal
+        #K = 1  # optimal
+        K = self.K
         topk_dists, topk_idx = dists_sq.topk(K, dim=2, largest=False)
         sim       = torch.exp(-topk_dists.mean(dim=2) / self.D ** 0.5)
         activated = (sim >= self.theta_init).bool()

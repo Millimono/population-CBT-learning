@@ -26,6 +26,7 @@ NUM_CELLS   = 1600
 PATCH_SIZE  = (5, 5)
 THETA_INIT  = 0.5
 SEEDS       = [42, 123, 456, 789, 1024]
+K = 1  
 
 # ============================================================
 def set_seed(seed):
@@ -152,7 +153,8 @@ if __name__ == "__main__":
             num_cells   = NUM_CELLS,
             patch_size  = PATCH_SIZE,
             theta_init  = THETA_INIT,
-            device      = DEVICE
+            device      = DEVICE,
+            K           = K  # ← passé à run_experiment
         )
 
         elapsed = time.time() - start_time  # ← fin chrono
