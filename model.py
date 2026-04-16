@@ -57,23 +57,47 @@ class PopulationBFastExact:
 
         return activated, z
 
-    def update_batch_lvq(self, activated, z, labels, lr=0.05):
-        N, B, D = z.shape
-        for i in range(N):
-            lbl = labels[i].item()
-            act = activated[i]
-            if not act.any():
-                continue
-            self.class_counts[act] *= 0.99
-            self.class_counts[act, lbl] += 1
-            self.proto_class[act] = self.class_counts[act].argmax(dim=1)
-            correct   = act & (self.proto_class == lbl)
-            incorrect = act & (self.proto_class != lbl)
-            if correct.any():
-                self.prototypes[correct] += lr * (z[i][correct] - self.prototypes[correct])
-            if incorrect.any():
-                self.prototypes[incorrect] -= lr * (z[i][incorrect] - self.prototypes[incorrect])
-        self.prototypes.clamp_(-5.0, 5.0)
+    # def update_batch_lvq(self, activated, z, labels, lr=0.05):
+    #     N, B, D = z.shape
+    #     for i in range(N):
+    #         lbl = labels[i].item()
+    #         act = activated[i]
+    #         if not act.any():
+    #             continue
+    #         self.class_counts[act] *= 0.99
+    #         self.class_counts[act, lbl] += 1
+    #         self.proto_class[act] = self.class_counts[act].argmax(dim=1)
+    #         correct   = act & (self.proto_class == lbl)
+    #         incorrect = act & (self.proto_class != lbl)
+    #         if correct.any():
+    #             self.prototypes[correct] += lr * (z[i][correct] - self.prototypes[correct])
+    #         if incorrect.any():
+    #             self.prototypes[incorrect] -= lr * (z[i][incorrect] - self.prototypes[incorrect])
+    #     self.prototypes.clamp_(-5.0, 5.0)
+
+    def update_batch_lvq(self, activated, z, labels, lr=0.05, freeze_classes=False):
+            N, B, D = z.shape
+            for i in range(N):
+                lbl = labels[i].item()
+                act = activated[i]
+                if not act.any():
+                    continue
+
+                if not freeze_classes:
+                    # Update normal avec decay
+                    self.class_counts[act] *= 0.99
+                    self.class_counts[act, lbl] += 1
+                    self.proto_class[act] = self.class_counts[act].argmax(dim=1)
+
+                correct   = act & (self.proto_class == lbl)
+                incorrect = act & (self.proto_class != lbl)
+
+                if correct.any():
+                    self.prototypes[correct] += lr * (z[i][correct] - self.prototypes[correct])
+                if incorrect.any():
+                    self.prototypes[incorrect] -= lr * (z[i][incorrect] - self.prototypes[incorrect])
+
+            self.prototypes.clamp_(-5.0, 5.0)
 
     def reassign_proto_class(self, train_images, train_labels, device, batch_size=32):
         self.class_counts.zero_()
@@ -100,7 +124,17 @@ class TrainerFastExact:
         self.device      = device
         self.num_classes = num_classes
 
-    def train_batch(self, images, labels, batch_size=16, lr=0.05):
+    # def train_batch(self, images, labels, batch_size=16, lr=0.05):
+    #     images_t = torch.stack(images).to(self.device)
+    #     labels_t = torch.tensor(labels, device=self.device, dtype=torch.long)
+    #     for start in range(0, len(images_t), batch_size):
+    #         end = min(start + batch_size, len(images_t))
+    #         activated, z = self.population.process_batch(images_t[start:end])
+    #         if not activated.any():
+    #             continue
+    #         self.population.update_batch_lvq(activated, z, labels_t[start:end], lr)
+
+    def train_batch(self, images, labels, batch_size=16, lr=0.05, freeze_classes=False):
         images_t = torch.stack(images).to(self.device)
         labels_t = torch.tensor(labels, device=self.device, dtype=torch.long)
         for start in range(0, len(images_t), batch_size):
@@ -108,7 +142,10 @@ class TrainerFastExact:
             activated, z = self.population.process_batch(images_t[start:end])
             if not activated.any():
                 continue
-            self.population.update_batch_lvq(activated, z, labels_t[start:end], lr)
+            self.population.update_batch_lvq(
+                activated, z, labels_t[start:end], lr,
+                freeze_classes=freeze_classes
+            )
 
     def predict_batch(self, images, batch_size=32):
         images_t  = torch.stack(images).to(self.device)
