@@ -406,6 +406,12 @@ if __name__ == "__main__":
         best_val_labels, preds_clean,
         target_names=["Cancer", "Normal"]))
 
+    from save_load import save_model
+
+    # ── Sauvegarder après entraînement ──────────────────────────
+    save_model(best_pop, path="figs/populationb_best.pt")
+
+
     # ============================================================
     # Figures
     # ============================================================
