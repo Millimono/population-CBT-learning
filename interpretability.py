@@ -412,3 +412,145 @@ def plot_interpretability_examples(pop, val_images, val_labels,
     plt.savefig(save_path, bbox_inches="tight", dpi=150)
     plt.close()
     print(f"[OK] Figure interprétabilité : {save_path}")
+
+
+def select_best_examples(pop, val_images, val_labels,
+                         class_names, device,
+                         n_candidates=30,
+                         n_examples=4):
+    """
+    Analyse n_candidates images et sélectionne automatiquement
+    les meilleures pour illustration.
+    """
+    candidates = []
+
+    for idx in range(min(n_candidates, len(val_images))):
+        img   = val_images[idx]
+        label = val_labels[idx]
+
+        img_t        = img.unsqueeze(0).to(device)
+        activated, _ = pop.process_batch(img_t)
+        act          = activated[0]
+
+        pred, votes, heatmap = _compute_heatmap_and_votes(
+            pop, img_t, act, device)
+
+        vote_vals    = votes.numpy()
+        n_active     = (act & (pop.proto_class >= 0)).sum().item()
+        vote_margin  = abs(vote_vals[0] - vote_vals[1])
+        correct      = (pred == label)
+
+        candidates.append({
+            "idx":         idx,
+            "img":         img,
+            "label":       label,
+            "pred":        pred,
+            "votes":       votes,
+            "heatmap":     heatmap,
+            "n_active":    n_active,
+            "vote_margin": vote_margin,
+            "correct":     correct
+        })
+
+    corrects   = [c for c in candidates
+                  if c["correct"] and c["n_active"] > 0]
+    incorrects = [c for c in candidates
+                  if not c["correct"] and c["n_active"] > 0]
+
+    corrects   = sorted(corrects,
+                        key=lambda x: x["vote_margin"],
+                        reverse=True)
+    incorrects = sorted(incorrects,
+                        key=lambda x: x["vote_margin"])
+
+    n_correct   = n_examples // 2
+    n_incorrect = n_examples - n_correct
+    selected    = corrects[:n_correct] + incorrects[:n_incorrect]
+
+    print(f"\n{'='*50}")
+    print(f"SÉLECTION AUTOMATIQUE — {len(selected)} images")
+    print(f"{'='*50}")
+    for c in selected:
+        status = "✅ Correct" if c["correct"] else "❌ Incorrect"
+        print(f"  idx={c['idx']:4d} | {status} | "
+              f"Réel={class_names[c['label']]:6s} | "
+              f"Prédit={class_names[c['pred']]:6s} | "
+              f"Margin={c['vote_margin']:.3f} | "
+              f"Actifs={c['n_active']}")
+
+    return selected
+
+
+def plot_best_interpretability_examples(pop, val_images, val_labels,
+                                        class_names, patch_size,
+                                        device, save_path,
+                                        n_candidates=30,
+                                        n_examples=4):
+    """
+    Analyse n_candidates images, sélectionne les meilleures
+    et génère la figure d'interprétabilité.
+    """
+    os.makedirs(
+        os.path.dirname(save_path) if os.path.dirname(save_path) else ".",
+        exist_ok=True)
+
+    selected = select_best_examples(
+        pop, val_images, val_labels,
+        class_names, device,
+        n_candidates=n_candidates,
+        n_examples=n_examples
+    )
+
+    fig, all_axes = plt.subplots(
+        n_examples, 3,
+        figsize=(15, n_examples * 4))
+
+    for row, c in enumerate(selected):
+        img      = c["img"]
+        label    = c["label"]
+        pred     = c["pred"]
+        votes    = c["votes"]
+        heatmap  = c["heatmap"]
+        n_active = c["n_active"]
+
+        # Colonne 1 — image originale
+        all_axes[row][0].imshow(img.cpu().numpy(), cmap="gray")
+        all_axes[row][0].set_title(
+            f"Classe réelle : {class_names[label]}\n"
+            f"idx={c['idx']}",
+            fontsize=10)
+        all_axes[row][0].axis("off")
+
+        # Colonne 2 — heatmap pondérée
+        all_axes[row][1].imshow(img.cpu().numpy(), cmap="gray", alpha=0.6)
+        all_axes[row][1].imshow(heatmap, cmap="hot", alpha=0.5)
+        status = "[OK]" if pred == label else "[ERREUR]"
+        all_axes[row][1].set_title(
+            f"{status} Prédit : {class_names[pred]}\n"
+            f"{n_active} prototypes actifs",
+            fontsize=10)
+        all_axes[row][1].axis("off")
+
+        # Colonne 3 — vote pondéré
+        vote_vals = votes.numpy()
+        colors    = ["#F44336" if i == pred else "#90CAF9"
+                     for i in range(pop.num_classes)]
+        bars = all_axes[row][2].bar(class_names, vote_vals, color=colors)
+        for bar, val in zip(bars, vote_vals):
+            all_axes[row][2].text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 0.001,
+                f"{val:.3f}", ha="center", va="bottom", fontsize=9)
+        all_axes[row][2].set_ylabel("Score (Σ fᵢ · wᵢ)")
+        all_axes[row][2].set_ylim(
+            0, max(vote_vals) * 1.2 + 0.01)
+        all_axes[row][2].grid(True, axis="y", alpha=0.3)
+
+    plt.suptitle(
+        f"Interprétabilité native — EpitopeNet\n"
+        f"Sélection automatique sur {n_candidates} images",
+        fontsize=13)
+    plt.tight_layout()
+    plt.savefig(save_path, bbox_inches="tight", dpi=150)
+    plt.close()
+    print(f"[OK] Figure interprétabilité : {save_path}")
