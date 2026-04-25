@@ -197,9 +197,42 @@ class PopulationBFastExact:
         std  = patches.std(dim=-1, keepdim=True).clamp(min=1e-6)
         return (patches - mean) / std
 
+
+    # def process_batch(self, imgs):
+    #     imgs        = imgs.to(self.device)
+    #     patches     = self.extract_patches_batch(imgs)
+    #     patches_std = self.preprocess_patches(patches)
+    #     protos      = self.preprocess_patches(self.prototypes.unsqueeze(0)).squeeze(0)
+
+    #     N, P, D = patches_std.shape
+    #     B       = protos.shape[0]
+
+    #     patches_sq = (patches_std ** 2).sum(dim=-1)
+    #     protos_sq  = (protos ** 2).sum(dim=-1)
+    #     dot        = torch.einsum("npd,bd->nbp", patches_std, protos)
+    #     dists_sq   = (patches_sq.unsqueeze(1) + protos_sq.view(1, B, 1) - 2 * dot).clamp(min=0)
+
+    #     K = self.K
+    #     topk_dists, topk_idx = dists_sq.topk(K, dim=2, largest=False)
+    #     sim       = torch.exp(-topk_dists.mean(dim=2) / self.D ** 0.5)
+    #     activated = (sim >= self.theta_init).bool()
+
+    #     topk_idx_exp = topk_idx.unsqueeze(-1).expand(-1, -1, -1, D)
+    #     patches_exp  = patches_std.unsqueeze(1).expand(-1, B, -1, -1)
+    #     z = patches_exp.gather(2, topk_idx_exp).mean(dim=2)
+
+    #     return activated, z
+
+
     def process_batch(self, imgs):
         imgs        = imgs.to(self.device)
         patches     = self.extract_patches_batch(imgs)
+        
+        # ── Filtrer les patches uniformes (arrière-plan noir) ──
+        raw_std = patches.std(dim=-1)          # (N, P) — std avant normalisation
+        valid_mask = (raw_std > 0.02)          # True = patch texturé, False = noir
+        # ────────────────────────────────────────────────────────
+        
         patches_std = self.preprocess_patches(patches)
         protos      = self.preprocess_patches(self.prototypes.unsqueeze(0)).squeeze(0)
 
@@ -209,7 +242,16 @@ class PopulationBFastExact:
         patches_sq = (patches_std ** 2).sum(dim=-1)
         protos_sq  = (protos ** 2).sum(dim=-1)
         dot        = torch.einsum("npd,bd->nbp", patches_std, protos)
-        dists_sq   = (patches_sq.unsqueeze(1) + protos_sq.view(1, B, 1) - 2 * dot).clamp(min=0)
+        dists_sq   = (patches_sq.unsqueeze(1) +
+                    protos_sq.view(1, B, 1) - 2 * dot).clamp(min=0)
+
+        # ── Appliquer le masque — patches noirs → distance infinie ──
+        # Un prototype ne peut pas s'activer sur un patch noir
+        dists_sq = dists_sq.masked_fill(
+            ~valid_mask.unsqueeze(1),   # (N, 1, P) broadcasté sur (N, B, P)
+            float('inf')
+        )
+        # ────────────────────────────────────────────────────────────
 
         K = self.K
         topk_dists, topk_idx = dists_sq.topk(K, dim=2, largest=False)
@@ -221,6 +263,7 @@ class PopulationBFastExact:
         z = patches_exp.gather(2, topk_idx_exp).mean(dim=2)
 
         return activated, z
+
 
     def update_batch_lvq(self, activated, z, labels, lr=0.05):
         """

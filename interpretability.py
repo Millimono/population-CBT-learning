@@ -640,3 +640,97 @@ def save_all_interpretability_examples(pop, val_images, val_labels,
         print(f"  [{idx+1:2d}/{n_candidates}] {fname}")
 
     print(f"\n[OK] {n_candidates} figures sauvegardées dans : {save_dir}/")
+
+def save_balanced_interpretability_examples(pop, val_images, val_labels,
+                                            class_names, device,
+                                            save_dir="figs/interpretability",
+                                            n_per_class=15):
+    """
+    Génère n_per_class figures par classe — équilibré.
+    """
+    os.makedirs(save_dir, exist_ok=True)
+
+    print(f"\n{'='*50}")
+    print(f"GÉNÉRATION ÉQUILIBRÉE — {n_per_class} images par classe")
+    print(f"{'='*50}")
+
+    # Séparer les indices par classe
+    class_indices = {c: [] for c in range(len(class_names))}
+    for idx, label in enumerate(val_labels):
+        class_indices[label].append(idx)
+
+    # Prendre n_per_class de chaque classe
+    selected_indices = []
+    for c in range(len(class_names)):
+        selected_indices.extend(class_indices[c][:n_per_class])
+
+    print(f"  Cancer  : {len(class_indices[0][:n_per_class])} images")
+    print(f"  Normal  : {len(class_indices[1][:n_per_class])} images")
+    print(f"  Total   : {len(selected_indices)} images\n")
+
+    for count, idx in enumerate(selected_indices):
+        img   = val_images[idx]
+        label = val_labels[idx]
+
+        img_t        = img.unsqueeze(0).to(device)
+        activated, _ = pop.process_batch(img_t)
+        act          = activated[0]
+
+        pred, votes, heatmap = _compute_heatmap_and_votes(
+            pop, img_t, act, device)
+
+        vote_vals   = votes.numpy()
+        n_active    = (act & (pop.proto_class >= 0)).sum().item()
+        vote_margin = abs(vote_vals[0] - vote_vals[1])
+        correct     = (pred == label)
+        status      = "correct" if correct else "incorrect"
+        status_label = "[OK]" if correct else "[ERREUR]"
+
+        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+
+        axes[0].imshow(img.cpu().numpy(), cmap="gray")
+        axes[0].set_title(
+            f"Classe réelle : {class_names[label]}",
+            fontsize=11)
+        axes[0].axis("off")
+
+        axes[1].imshow(img.cpu().numpy(), cmap="gray", alpha=0.6)
+        axes[1].imshow(heatmap, cmap="hot", alpha=0.5)
+        axes[1].set_title(
+            f"{status_label} Prédit : {class_names[pred]}\n"
+            f"{n_active} prototypes actifs",
+            fontsize=10)
+        axes[1].axis("off")
+
+        colors = ["#F44336" if i == pred else "#90CAF9"
+                  for i in range(pop.num_classes)]
+        bars = axes[2].bar(class_names, vote_vals, color=colors)
+        for bar, val in zip(bars, vote_vals):
+            axes[2].text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 0.001,
+                f"{val:.3f}", ha="center", va="bottom", fontsize=10)
+        axes[2].set_ylabel("Score (Σ fᵢ · wᵢ)")
+        axes[2].set_ylim(0, max(vote_vals) * 1.2 + 0.01)
+        axes[2].grid(True, axis="y", alpha=0.3)
+
+        plt.suptitle(
+            f"EpitopeNet — idx={idx} | {status_label} "
+            f"Réel: {class_names[label]} → Prédit: {class_names[pred]} | "
+            f"Margin: {vote_margin:.3f}",
+            fontsize=12)
+        plt.tight_layout()
+
+        fname = (f"idx{idx:04d}"
+                 f"_real{class_names[label]}"
+                 f"_pred{class_names[pred]}"
+                 f"_{status}"
+                 f"_margin{vote_margin:.3f}"
+                 f".png")
+        save_path = os.path.join(save_dir, fname)
+        plt.savefig(save_path, bbox_inches="tight", dpi=150)
+        plt.close()
+
+        print(f"  [{count+1:2d}/{len(selected_indices)}] {fname}")
+
+    print(f"\n[OK] {len(selected_indices)} figures dans : {save_dir}/")
