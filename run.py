@@ -249,6 +249,8 @@ from train           import run_experiment
 from baselines       import run_baselines
 from interpretability import plot_interpretability_examples
 
+
+
 # ============================================================
 # CONFIG
 # ============================================================
@@ -258,11 +260,16 @@ DEVICE      = "cuda" if torch.cuda.is_available() else "cpu"
 NUM_CLASSES = 2
 EPOCHS      = 40
 LR          = 0.1
-NUM_CELLS   = 1600
+NUM_CELLS   = 6400        # ← correct
 PATCH_SIZE  = (5, 5)
 THETA_INIT  = 0.5
 SEEDS       = [42, 123, 456, 789, 1024]
 K           = 1
+DATASET     = "ddsm"      # "ddsm" ou "generic"
+# ── CONFIG ────────────────────────────────────────────────
+
+
+DATASET = "ddsm"      # "ddsm" ou "generic"
 
 # ============================================================
 def set_seed(seed):
@@ -343,10 +350,19 @@ if __name__ == "__main__":
 
     for seed in SEEDS:
         set_seed(seed)
-
-        train_images, train_labels, val_images, val_labels = load_ddsm(
-            TRAIN_DIR, VAL_DIR
-        )
+        if DATASET == "ddsm":
+            train_images, train_labels, val_images, val_labels = load_ddsm(
+                TRAIN_DIR, VAL_DIR, use_mask = True 
+            )
+        elif DATASET == "generic":
+            from data import load_generic
+            train_images, train_labels, val_images, val_labels = load_generic(
+                train_dir     = "/chemin/vers/train",
+                val_dir       = "/chemin/vers/val",
+                classes       = ["ClasseA", "ClasseB"],
+                max_per_class = 1000,
+                img_size      = 64
+            )
 
         start_time = time.time()
 
