@@ -225,16 +225,19 @@ class PopulationBFastExact:
 
 
     def process_batch(self, imgs):
-        imgs        = imgs.to(self.device)
-        patches     = self.extract_patches_batch(imgs)
-        
-        # ── Filtrer les patches uniformes (arrière-plan noir) ──
-        raw_std = patches.std(dim=-1)          # (N, P) — std avant normalisation
-        valid_mask = (raw_std > 0.02)          # True = patch texturé, False = noir
+        imgs    = imgs.to(self.device)
+        patches = self.extract_patches_batch(imgs)
+
+        # ── Filtrer les patches uniformes ──────────────────────
+        raw_std   = patches.std(dim=-1)                          # (N, P)
+        threshold = torch.quantile(raw_std, 0.10, dim=1,
+                                keepdim=True)                 # (N, 1)
+        valid_mask = (raw_std > threshold)                       # (N, P)
         # ────────────────────────────────────────────────────────
-        
+
         patches_std = self.preprocess_patches(patches)
-        protos      = self.preprocess_patches(self.prototypes.unsqueeze(0)).squeeze(0)
+        protos      = self.preprocess_patches(
+                        self.prototypes.unsqueeze(0)).squeeze(0)
 
         N, P, D = patches_std.shape
         B       = protos.shape[0]
@@ -245,13 +248,12 @@ class PopulationBFastExact:
         dists_sq   = (patches_sq.unsqueeze(1) +
                     protos_sq.view(1, B, 1) - 2 * dot).clamp(min=0)
 
-        # ── Appliquer le masque — patches noirs → distance infinie ──
-        # Un prototype ne peut pas s'activer sur un patch noir
+        # ── Patches uniformes → distance infinie ───────────────
         dists_sq = dists_sq.masked_fill(
-            ~valid_mask.unsqueeze(1),   # (N, 1, P) broadcasté sur (N, B, P)
+            ~valid_mask.unsqueeze(1),
             float('inf')
         )
-        # ────────────────────────────────────────────────────────────
+        # ────────────────────────────────────────────────────────
 
         K = self.K
         topk_dists, topk_idx = dists_sq.topk(K, dim=2, largest=False)
@@ -263,6 +265,7 @@ class PopulationBFastExact:
         z = patches_exp.gather(2, topk_idx_exp).mean(dim=2)
 
         return activated, z
+
 
 
     def update_batch_lvq(self, activated, z, labels, lr=0.05):
