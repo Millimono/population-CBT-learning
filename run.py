@@ -251,25 +251,39 @@ from interpretability import plot_interpretability_examples
 
 
 
+# # ============================================================
+# # CONFIG
+# # ============================================================
+# TRAIN_DIR   = "/content/PhD_AI_Grad_CAM_CAS_1_BAselines/miniddsm/train"
+# VAL_DIR     = "/content/PhD_AI_Grad_CAM_CAS_1_BAselines/miniddsm/val"
+# DEVICE      = "cuda" if torch.cuda.is_available() else "cpu"
+# NUM_CLASSES = 2
+# EPOCHS      = 40
+# LR          = 0.1
+# NUM_CELLS   = 6400        # ← correct
+# PATCH_SIZE  = (5, 5)
+# THETA_INIT  = 0.5
+# SEEDS       = [42, 123, 456, 789, 1024]
+# K           = 1
+# DATASET     = "ddsm"      # "ddsm" ou "generic"
+# # ── CONFIG ────────────────────────────────────────────────
+
 # ============================================================
 # CONFIG
 # ============================================================
-TRAIN_DIR   = "/content/PhD_AI_Grad_CAM_CAS_1_BAselines/miniddsm/train"
-VAL_DIR     = "/content/PhD_AI_Grad_CAM_CAS_1_BAselines/miniddsm/val"
+TRAIN_DIR   = "/content/cbis-ddsm-prepared/train"   # ← nouveau chemin
+VAL_DIR     = "/content/cbis-ddsm-prepared/val"     # ← nouveau chemin
 DEVICE      = "cuda" if torch.cuda.is_available() else "cpu"
 NUM_CLASSES = 2
 EPOCHS      = 40
 LR          = 0.1
-NUM_CELLS   = 6400        # ← correct
+NUM_CELLS   = 6400
 PATCH_SIZE  = (5, 5)
 THETA_INIT  = 0.5
 SEEDS       = [42, 123, 456, 789, 1024]
 K           = 1
+
 DATASET     = "ddsm"      # "ddsm" ou "generic"
-# ── CONFIG ────────────────────────────────────────────────
-
-
-DATASET = "ddsm"      # "ddsm" ou "generic"
 
 # ============================================================
 def set_seed(seed):
