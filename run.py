@@ -362,10 +362,13 @@ if __name__ == "__main__":
     best_trainer    = None
     best_val_labels = None
 
-    print("=== EVALUATION SUR 5 SEEDS ===\n")
-    torch.cuda.empty_cache()
+    print("=== EVALUATION SUR 5 SEEDS ===\n")    
     for seed in SEEDS:
         set_seed(seed)
+        # ── Libérer GPU ──────────────────────────────────
+        torch.cuda.empty_cache()
+        gc.collect()
+        # ─────────────────────────────────────────────────
         if DATASET == "ddsm":
             train_images, train_labels, val_images, val_labels = load_ddsm(
                 TRAIN_DIR, VAL_DIR, use_mask = True 
