@@ -27,10 +27,18 @@ class PopulationBFastExact:
         patches = F.unfold(imgs.unsqueeze(1), kernel_size=self.patch_size, stride=1)
         return patches.transpose(1, 2)  # (N, P, D)
 
+    # def preprocess_patches(self, patches):
+    #     mean = patches.mean(dim=-1, keepdim=True)
+    #     std  = patches.std(dim=-1, keepdim=True).clamp(min=1e-6)
+    #     return (patches - mean) / std
     def preprocess_patches(self, patches):
-        mean = patches.mean(dim=-1, keepdim=True)
-        std  = patches.std(dim=-1, keepdim=True).clamp(min=1e-6)
-        return (patches - mean) / std
+        # AVANT : normalisation z-score
+        # mean = patches.mean(dim=-1, keepdim=True)
+        # std  = patches.std(dim=-1, keepdim=True).clamp(min=1e-6)
+        # return (patches - mean) / std
+        
+        # APRÈS : aucune normalisation
+        return patches
 
 
     def process_batch(self, imgs):
