@@ -271,8 +271,10 @@ from interpretability import plot_interpretability_examples
 # ============================================================
 # CONFIG
 # ============================================================
-TRAIN_DIR   = "/content/cbis-ddsm-prepared/train"   # ← nouveau chemin
-VAL_DIR     = "/content/cbis-ddsm-prepared/val"     # ← nouveau chemin
+# TRAIN_DIR   = "/content/cbis-ddsm-prepared/train"   # ← nouveau chemin
+# VAL_DIR     = "/content/cbis-ddsm-prepared/val"     # ← nouveau chemin
+TRAIN_DIR   = ""   # ← peut rester vide, ignoré
+VAL_DIR     = ""
 DEVICE      = "cuda" if torch.cuda.is_available() else "cpu"
 NUM_CLASSES = 2
 EPOCHS      = 40
@@ -361,7 +363,7 @@ if __name__ == "__main__":
     best_val_labels = None
 
     print("=== EVALUATION SUR 5 SEEDS ===\n")
-
+    torch.cuda.empty_cache()
     for seed in SEEDS:
         set_seed(seed)
         if DATASET == "ddsm":
