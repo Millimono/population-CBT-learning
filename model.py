@@ -1,3 +1,8 @@
+
+# ============================================================
+# model.py
+# ============================================================
+
 import torch
 import torch.nn.functional as F
 
@@ -163,7 +168,25 @@ class PopulationBFastExact:
 
         return weights, freq  # weights = poids, freq = distribution
 
-    def reassign_proto_class(self, train_images, train_labels, device, batch_size=32):
+    # def reassign_proto_class(self, train_images, train_labels, device, batch_size=32):
+    #     self.class_counts.zero_()
+    #     images_t = torch.stack(train_images).to(device)
+    #     labels_t = torch.tensor(train_labels, device=device, dtype=torch.long)
+
+    #     for start in range(0, len(images_t), batch_size):
+    #         end = min(start + batch_size, len(images_t))
+    #         activated, _ = self.process_batch(images_t[start:end])
+    #         lbls_b = labels_t[start:end]
+    #         for i in range(end - start):
+    #             self.class_counts[activated[i], lbls_b[i].item()] += 1
+
+    #     assigned = self.class_counts.sum(dim=1) > 0
+    #     class_freq        = self.class_counts.sum(dim=0).clamp(min=1)
+    #     counts_normalized = self.class_counts / class_freq.unsqueeze(0)
+    #     self.proto_class[assigned]  = counts_normalized[assigned].argmax(dim=1)
+    #     self.proto_class[~assigned] = -1
+
+    def reassign_proto_class(self, train_images, train_labels, device, batch_size=8):
         self.class_counts.zero_()
         images_t = torch.stack(train_images).to(device)
         labels_t = torch.tensor(train_labels, device=device, dtype=torch.long)
@@ -176,6 +199,9 @@ class PopulationBFastExact:
                 self.class_counts[activated[i], lbls_b[i].item()] += 1
 
         assigned = self.class_counts.sum(dim=1) > 0
+        n_assigned = assigned.sum().item()
+        print(f"    [Reassign] {n_assigned}/6400 prototypes assignés")  # ← AJOUTER
+        
         class_freq        = self.class_counts.sum(dim=0).clamp(min=1)
         counts_normalized = self.class_counts / class_freq.unsqueeze(0)
         self.proto_class[assigned]  = counts_normalized[assigned].argmax(dim=1)

@@ -281,7 +281,7 @@ EPOCHS      = 40
 LR          = 0.1
 NUM_CELLS   = 6400
 PATCH_SIZE  = (7, 7)
-THETA_INIT  = 0.5
+THETA_INIT  = 0.75
 SEEDS       = [42, 123, 456, 789, 1024]
 K           = 1
 
@@ -404,7 +404,7 @@ if __name__ == "__main__":
         accs.append(acc)
 
         # F1 et AUC
-        preds       = trainer.predict_batch(val_images, batch_size=32)
+        preds       = trainer.predict_batch(val_images, batch_size=8)
         preds_clean = [p if p is not None else 0 for p in preds]
         f1  = f1_score(val_labels, preds_clean, average="macro")
         auc = roc_auc_score(val_labels, preds_clean)
@@ -435,7 +435,7 @@ if __name__ == "__main__":
 
     # Rapport détaillé meilleur run
     print("\n=== RAPPORT DÉTAILLÉ (meilleur run) ===")
-    preds_best  = best_trainer.predict_batch(val_images, batch_size=32)
+    preds_best  = best_trainer.predict_batch(val_images, batch_size=8)
     preds_clean = [p if p is not None else 0 for p in preds_best]
     print(classification_report(
         best_val_labels, preds_clean,
