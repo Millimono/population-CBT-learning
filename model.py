@@ -87,7 +87,7 @@ class PopulationBFastExact:
         weights   = (max_freq - mean_freq) * 2
         return weights, freq
 
-    def reassign_proto_class(self, train_images, train_labels, device, batch_size=8):
+    def reassign_proto_class(self, train_images, train_labels, device, batch_size=2):  # ← 2 au lieu de 8
         self.class_counts.zero_()
         images_t = torch.stack(train_images).to(device)
         labels_t = torch.tensor(train_labels, device=device, dtype=torch.long)
@@ -115,7 +115,7 @@ class TrainerFastExact:
         self.device      = device
         self.num_classes = num_classes
 
-    def train_batch(self, images, labels, batch_size=4, lr=0.05):
+    def train_batch(self, images, labels, batch_size=2, lr=0.05):  # ← 2 au lieu de 4
         images_t = torch.stack(images).to(self.device)
         labels_t = torch.tensor(labels, device=self.device, dtype=torch.long)
         for start in range(0, len(images_t), batch_size):
@@ -125,7 +125,7 @@ class TrainerFastExact:
                 continue
             self.population.update_batch_lvq(activated, z, labels_t[start:end], lr)
 
-    def predict_batch(self, images, batch_size=8):
+    def predict_batch(self, images, batch_size=4):  # ← 4 au lieu de 8
         images_t  = torch.stack(images).to(self.device)
         all_preds = []
         weights, freq = self.population.get_vote_weights()

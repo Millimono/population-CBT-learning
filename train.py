@@ -332,11 +332,11 @@ def run_experiment(train_images, train_labels, val_images, val_labels,
         
         # ── Batch_size réduit pour images 128×128 ─────────
         trainer.train_batch(train_images, train_labels,
-                            batch_size=4, lr=lr_epoch)
+                            batch_size=2, lr=lr_epoch)
         pop.reassign_proto_class(train_images, train_labels, device,
-                                 batch_size=8)
+                                 batch_size=2)
 
-        preds = trainer.predict_batch(val_images, batch_size=8)
+        preds = trainer.predict_batch(val_images, batch_size=2)
         # ──────────────────────────────────────────────────
         
         correct = sum(p == l for p, l in zip(preds, val_labels) if p is not None)
