@@ -268,25 +268,22 @@ from interpretability import plot_interpretability_examples
 # DATASET     = "ddsm"      # "ddsm" ou "generic"
 # # ── CONFIG ────────────────────────────────────────────────
 
+
 # ============================================================
 # CONFIG
 # ============================================================
-# TRAIN_DIR   = "/content/cbis-ddsm-prepared/train"   # ← nouveau chemin
-# VAL_DIR     = "/content/cbis-ddsm-prepared/val"     # ← nouveau chemin
-TRAIN_DIR   = ""   # ← peut rester vide, ignoré
+TRAIN_DIR   = ""
 VAL_DIR     = ""
 DEVICE      = "cuda" if torch.cuda.is_available() else "cpu"
 NUM_CLASSES = 2
 EPOCHS      = 40
 LR          = 0.1
 NUM_CELLS   = 6400
-PATCH_SIZE  = (7, 7)
-THETA_INIT  = 0.75
-SEEDS       = [42, 123, 456, 789, 1024]
+PATCH_SIZE  = (13, 13)  # ~5% de 256×256
+THETA_INIT  = 0.5       # normalisation z-score active
+SEEDS       = [42]      # test 1 seed d'abord
 K           = 1
-
-DATASET     = "ddsm"      # "ddsm" ou "generic"
-
+DATASET     = "ddsm"
 # ============================================================
 def set_seed(seed):
     import random
