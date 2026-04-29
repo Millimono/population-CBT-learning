@@ -474,6 +474,202 @@
 # run.py — Multi-scale avec visualisations
 # ============================================================
 
+# import os
+# import gc
+# import time
+# import torch
+# import numpy as np
+# import matplotlib.pyplot as plt
+# from sklearn.metrics import f1_score, roc_auc_score, classification_report
+# from data  import load_ddsm
+# from train import run_experiment
+# from save_load import save_model
+# from interpretability import save_epoch_visualizations
+
+# # ============================================================
+# # CONFIG
+# # ============================================================
+# TRAIN_DIR   = ""
+# VAL_DIR     = ""
+# DEVICE      = "cuda" if torch.cuda.is_available() else "cpu"
+# NUM_CLASSES = 2
+# EPOCHS      = 40
+# LR          = 0.1
+# NUM_CELLS   = 6400
+# PATCH_SIZES = [(5, 5), (9, 9), (13, 13)]
+# THETA_INIT  = 0.5
+# SEEDS       = [42]
+# K           = 1
+# DATASET     = "ddsm"
+
+# # ── Visualisations ────────────────────────────────────────
+# SAVE_VIZ_EVERY = 5  # Sauvegarder tous les 5 epochs
+# VIZ_DIR = "figs/multiscale_epoch_viz"  # Dossier visualisations
+# # ──────────────────────────────────────────────────────────
+
+
+# def set_seed(seed):
+#     import random
+#     torch.manual_seed(seed)
+#     torch.cuda.manual_seed_all(seed)
+#     np.random.seed(seed)
+#     random.seed(seed)
+#     torch.backends.cudnn.deterministic = True
+
+
+# def plot_learning_curve(history, name, save_path):
+#     fig, ax = plt.subplots(figsize=(8, 5))
+#     epochs  = range(1, len(history) + 1)
+#     ax.plot(epochs, history, color="#2196F3", linewidth=2, label="Multi-scale")
+#     ax.axhline(y=max(history), color="#2196F3", linestyle=":",
+#                linewidth=1.5, label=f"Best ({max(history):.2%})")
+#     ax.set_xlabel("Epoch", fontsize=12)
+#     ax.set_ylabel("Accuracy (validation)", fontsize=12)
+#     ax.set_title(name, fontsize=13)
+#     ax.legend(fontsize=10)
+#     ax.set_ylim(0.3, 1.0)
+#     if len(history) > 1:
+#         ax.set_xlim(1, len(history))
+#     ax.grid(True, alpha=0.3)
+#     plt.tight_layout()
+#     plt.savefig(save_path, bbox_inches="tight", dpi=150)
+#     plt.close()
+#     print(f"[OK] Courbe sauvegardée : {save_path}")
+
+
+# if __name__ == "__main__":
+#     torch.cuda.empty_cache()
+#     gc.collect()
+#     os.makedirs("figs", exist_ok=True)
+#     print(f"Device: {DEVICE}")
+
+#     accs = []
+#     f1s = []
+#     aucs = []
+#     train_times = []
+#     best_acc = 0.0
+#     best_pop = None
+#     best_history = None
+#     best_trainer = None
+#     best_val_labels = None
+#     best_val_images = None
+
+#     print("=== EVALUATION MULTI-SCALE ===\n")
+#     print(f"Patch sizes : {PATCH_SIZES}\n")
+    
+#     for seed in SEEDS:
+#         set_seed(seed)
+#         torch.cuda.empty_cache()
+#         gc.collect()
+        
+#         train_images, train_labels, val_images, val_labels = load_ddsm(
+#             TRAIN_DIR, VAL_DIR, use_mask=True
+#         )
+
+#         start_time = time.time()
+
+#         acc, pop, trainer, history = run_experiment(
+#             train_images, train_labels,
+#             val_images,   val_labels,
+#             name        = f"MiniDDSM Multi-scale — seed={seed}",
+#             num_classes = NUM_CLASSES,
+#             epochs      = EPOCHS,
+#             lr          = LR,
+#             num_cells   = NUM_CELLS,
+#             patch_sizes = PATCH_SIZES,
+#             theta_init  = THETA_INIT,
+#             device      = DEVICE,
+#             K           = K,
+#             save_viz_every = SAVE_VIZ_EVERY,
+#             viz_dir     = VIZ_DIR
+#         )
+
+#         elapsed = time.time() - start_time
+#         train_times.append(elapsed)
+#         accs.append(acc)
+
+#         # F1 et AUC
+#         preds = trainer.predict_batch(val_images, batch_size=4)
+#         preds_clean = [p if p is not None else 0 for p in preds]
+#         f1  = f1_score(val_labels, preds_clean, average="macro")
+#         auc = roc_auc_score(val_labels, preds_clean)
+#         f1s.append(f1)
+#         aucs.append(auc)
+
+#         print(f"Seed {seed:5d} → Acc: {acc:.4f} | F1: {f1:.4f} | "
+#               f"AUC: {auc:.4f} | Temps: {elapsed/60:.1f} min\n")
+
+#         if acc > best_acc:
+#             best_acc = acc
+#             best_pop = pop
+#             best_history = history
+#             best_trainer = trainer
+#             best_val_labels = val_labels
+#             best_val_images = val_images
+
+#     # ============================================================
+#     # Résumé
+#     # ============================================================
+#     print(f"{'='*60}")
+#     print(f"RÉSUMÉ MULTI-SCALE")
+#     print(f"{'='*60}")
+#     print(f"Patch sizes : {PATCH_SIZES}")
+#     print(f"  Accuracy  : {np.mean(accs):.4f} ± {np.std(accs):.4f}")
+#     print(f"  F1 macro  : {np.mean(f1s):.4f} ± {np.std(f1s):.4f}")
+#     print(f"  AUC       : {np.mean(aucs):.4f} ± {np.std(aucs):.4f}")
+#     print(f"  Temps/run : {np.mean(train_times)/60:.1f} min")
+#     print(f"{'='*60}")
+
+#     # Rapport détaillé
+#     if best_trainer is not None:
+#         print("\n=== RAPPORT DÉTAILLÉ (meilleur modèle) ===")
+#         preds_best  = best_trainer.predict_batch(best_val_images, batch_size=4)
+#         preds_clean = [p if p is not None else 0 for p in preds_best]
+#         print(classification_report(
+#             best_val_labels, preds_clean,
+#             target_names=["Cancer", "Normal"]))
+
+#     # ============================================================
+#     # Sauvegarder meilleur modèle
+#     # ============================================================
+#     if best_pop is not None:
+#         save_model(best_pop, path="figs/model_multiscale_best.pt")
+        
+#         # Visualisations finales sur meilleur modèle
+#         print("\n=== VISUALISATIONS FINALES (meilleur modèle) ===")
+#         save_epoch_visualizations(
+#             pop=best_pop,
+#             trainer=best_trainer,
+#             val_images=best_val_images,
+#             val_labels=best_val_labels,
+#             epoch=999,  # epoch spécial pour "best"
+#             class_names=["Cancer", "Normal"],
+#             save_dir="figs/multiscale_best_model_viz",
+#             n_examples=10  # Plus d'exemples pour le meilleur
+#         )
+
+#     # ============================================================
+#     # Courbe d'apprentissage
+#     # ============================================================
+#     if best_history is not None:
+#         plot_learning_curve(
+#             history   = best_history,
+#             name      = f"Multi-scale (best={best_acc:.2%})",
+#             save_path = "figs/learning_curve_multiscale.png"
+#         )
+
+#     print("\n[OK] Terminé !")
+#     print(f"{'='*60}")
+#     print(f"Visualisations périodiques : {VIZ_DIR}/")
+#     print(f"Visualisations best model  : figs/multiscale_best_model_viz/")
+#     print(f"Modèle sauvegardé          : figs/model_multiscale_best.pt")
+#     print(f"{'='*60}")
+
+# ============================================================
+# ============================================================
+# run.py — Multi-scale avec intensité
+# ============================================================
+
 import os
 import gc
 import time
@@ -498,14 +694,16 @@ LR          = 0.1
 NUM_CELLS   = 6400
 PATCH_SIZES = [(5, 5), (9, 9), (13, 13)]
 THETA_INIT  = 0.5
-SEEDS       = [42]
+SEEDS       = [42]  # 5 seeds, 123, 456, 789, 1024
 K           = 1
 DATASET     = "ddsm"
 
-# ── Visualisations ────────────────────────────────────────
-SAVE_VIZ_EVERY = 5  # Sauvegarder tous les 5 epochs
-VIZ_DIR = "figs/multiscale_epoch_viz"  # Dossier visualisations
+# ── Feature intensité ─────────────────────────────────────
+USE_INTENSITY = True  # ← ACTIVER LA FEATURE INTENSITÉ
 # ──────────────────────────────────────────────────────────
+
+SAVE_VIZ_EVERY = 5
+VIZ_DIR = "figs/multiscale_intensity_viz"
 
 
 def set_seed(seed):
@@ -554,8 +752,9 @@ if __name__ == "__main__":
     best_val_labels = None
     best_val_images = None
 
-    print("=== EVALUATION MULTI-SCALE ===\n")
-    print(f"Patch sizes : {PATCH_SIZES}\n")
+    print("=== EVALUATION MULTI-SCALE AVEC INTENSITÉ ===\n")
+    print(f"Patch sizes : {PATCH_SIZES}")
+    print(f"Feature intensité : {USE_INTENSITY}\n")
     
     for seed in SEEDS:
         set_seed(seed)
@@ -571,24 +770,25 @@ if __name__ == "__main__":
         acc, pop, trainer, history = run_experiment(
             train_images, train_labels,
             val_images,   val_labels,
-            name        = f"MiniDDSM Multi-scale — seed={seed}",
-            num_classes = NUM_CLASSES,
-            epochs      = EPOCHS,
-            lr          = LR,
-            num_cells   = NUM_CELLS,
-            patch_sizes = PATCH_SIZES,
-            theta_init  = THETA_INIT,
-            device      = DEVICE,
-            K           = K,
+            name          = f"MiniDDSM Multi-scale+Intensité — seed={seed}",
+            num_classes   = NUM_CLASSES,
+            epochs        = EPOCHS,
+            lr            = LR,
+            num_cells     = NUM_CELLS,
+            patch_sizes   = PATCH_SIZES,
+            theta_init    = THETA_INIT,
+            device        = DEVICE,
+            K             = K,
+            use_intensity = USE_INTENSITY,  # ← PASSER LE PARAMÈTRE
             save_viz_every = SAVE_VIZ_EVERY,
-            viz_dir     = VIZ_DIR
+            viz_dir       = VIZ_DIR
         )
 
         elapsed = time.time() - start_time
         train_times.append(elapsed)
         accs.append(acc)
 
-        # F1 et AUC
+        # Métriques
         preds = trainer.predict_batch(val_images, batch_size=4)
         preds_clean = [p if p is not None else 0 for p in preds]
         f1  = f1_score(val_labels, preds_clean, average="macro")
@@ -607,13 +807,12 @@ if __name__ == "__main__":
             best_val_labels = val_labels
             best_val_images = val_images
 
-    # ============================================================
     # Résumé
-    # ============================================================
     print(f"{'='*60}")
-    print(f"RÉSUMÉ MULTI-SCALE")
+    print(f"RÉSUMÉ MULTI-SCALE + INTENSITÉ")
     print(f"{'='*60}")
     print(f"Patch sizes : {PATCH_SIZES}")
+    print(f"Feature intensité : {USE_INTENSITY}")
     print(f"  Accuracy  : {np.mean(accs):.4f} ± {np.std(accs):.4f}")
     print(f"  F1 macro  : {np.mean(f1s):.4f} ± {np.std(f1s):.4f}")
     print(f"  AUC       : {np.mean(aucs):.4f} ± {np.std(aucs):.4f}")
@@ -629,38 +828,34 @@ if __name__ == "__main__":
             best_val_labels, preds_clean,
             target_names=["Cancer", "Normal"]))
 
-    # ============================================================
-    # Sauvegarder meilleur modèle
-    # ============================================================
+    # Sauvegarder
     if best_pop is not None:
-        save_model(best_pop, path="figs/model_multiscale_best.pt")
+        save_model(best_pop, path="figs/model_multiscale_intensity_best.pt")
         
-        # Visualisations finales sur meilleur modèle
-        print("\n=== VISUALISATIONS FINALES (meilleur modèle) ===")
+        # Visualisations finales
+        print("\n=== VISUALISATIONS FINALES ===")
         save_epoch_visualizations(
             pop=best_pop,
             trainer=best_trainer,
             val_images=best_val_images,
             val_labels=best_val_labels,
-            epoch=999,  # epoch spécial pour "best"
+            epoch=999,
             class_names=["Cancer", "Normal"],
-            save_dir="figs/multiscale_best_model_viz",
-            n_examples=10  # Plus d'exemples pour le meilleur
+            save_dir="figs/multiscale_intensity_best_viz",
+            n_examples=10
         )
 
-    # ============================================================
-    # Courbe d'apprentissage
-    # ============================================================
+    # Courbe
     if best_history is not None:
         plot_learning_curve(
             history   = best_history,
-            name      = f"Multi-scale (best={best_acc:.2%})",
-            save_path = "figs/learning_curve_multiscale.png"
+            name      = f"Multi-scale+Intensité (best={best_acc:.2%})",
+            save_path = "figs/learning_curve_intensity.png"
         )
 
     print("\n[OK] Terminé !")
     print(f"{'='*60}")
-    print(f"Visualisations périodiques : {VIZ_DIR}/")
-    print(f"Visualisations best model  : figs/multiscale_best_model_viz/")
-    print(f"Modèle sauvegardé          : figs/model_multiscale_best.pt")
+    print(f"Visualisations : {VIZ_DIR}/")
+    print(f"Best model viz : figs/multiscale_intensity_best_viz/")
+    print(f"Modèle sauvegardé : figs/model_multiscale_intensity_best.pt")
     print(f"{'='*60}")
