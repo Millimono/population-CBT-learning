@@ -192,17 +192,41 @@ import torch
 from model import PopulationBFastExact, TrainerFastExact
 
 
-def init_prototypes_from_data(population, images, device, n_samples=200):
-    """Initialisation simple depuis patches réels."""
-    imgs_batch = torch.stack(images[:n_samples]).to(device)
-    patches    = population.extract_patches_batch(imgs_batch)
-    patches    = population.preprocess_patches(patches)
-    patches    = patches.reshape(-1, patches.shape[2])
-    idx = torch.randperm(patches.shape[0])[:population.B]
-    population.prototypes = patches[idx].clone().to(device)
-    population.proto_class.fill_(-1)
-    print(f"Prototypes initialisés depuis {patches.shape[0]} patches réels")
+# def init_prototypes_from_data(population, images, device, n_samples=200):
+#     """Initialisation simple depuis patches réels."""
+#     imgs_batch = torch.stack(images[:n_samples]).to(device)
+#     patches    = population.extract_patches_batch(imgs_batch)
+#     patches    = population.preprocess_patches(patches)
+#     patches    = patches.reshape(-1, patches.shape[2])
+#     idx = torch.randperm(patches.shape[0])[:population.B]
+#     population.prototypes = patches[idx].clone().to(device)
+#     population.proto_class.fill_(-1)
+#     print(f"Prototypes initialisés depuis {patches.shape[0]} patches réels")
 
+def init_prototypes_from_data(population, images, device, n_samples=50):
+        """Initialisation depuis patches réels — par petits batches."""
+        all_patches = []
+        
+        # Traiter par batch de 10 images
+        for i in range(0, min(n_samples, len(images)), 10):
+            batch = images[i:i+10]
+            imgs_batch = torch.stack(batch).to(device)
+            patches    = population.extract_patches_batch(imgs_batch)
+            patches    = population.preprocess_patches(patches)
+            patches    = patches.reshape(-1, patches.shape[2])
+            all_patches.append(patches.cpu())  # déplacer sur CPU
+            del imgs_batch, patches
+            torch.cuda.empty_cache()
+        
+        # Concaténer sur CPU
+        all_patches = torch.cat(all_patches, dim=0)
+        
+        # Échantillonner sur CPU
+        idx = torch.randperm(all_patches.shape[0])[:population.B]
+        population.prototypes = all_patches[idx].clone().to(device)
+        population.proto_class.fill_(-1)
+        
+        print(f"Prototypes initialisés depuis {all_patches.shape[0]} patches réels")
 
 # def run_experiment(train_images, train_labels, val_images, val_labels,
 #                    name, num_classes, epochs=40, lr=0.1,
@@ -292,7 +316,9 @@ def run_experiment(train_images, train_labels, val_images, val_labels,
         device     = device
     )
     trainer = TrainerFastExact(population=pop, num_classes=num_classes, device=device)
-    init_prototypes_from_data(pop, train_images, device, n_samples=200)
+    # init_prototypes_from_data(pop, train_images, device, n_samples=200)
+    init_prototypes_from_data(pop, train_images, device, n_samples=50)
+
 
     best_acc     = 0.0
     best_protos  = pop.prototypes.clone()
