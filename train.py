@@ -375,21 +375,21 @@
 
 
 # ============================================================
-# train.py — Multi-scale
+# train.py — Multi-scale avec visualisations
 # ============================================================
 
 import torch
 from model import PopulationBMultiScale, TrainerMultiScale
+from interpretability import save_epoch_visualizations
 
 
 def init_prototypes_from_data(population, images, device, n_samples=50):
-    """Initialisation multi-échelle depuis patches réels."""
+    """Initialisation multi-échelle."""
     print(f"Initialisation prototypes multi-échelle (n_samples={n_samples})...")
     
     for scale_idx, patch_size in enumerate(population.patch_sizes):
         all_patches = []
         
-        # Traiter par petits batchs
         for i in range(0, min(n_samples, len(images)), 10):
             batch = images[i:i+10]
             imgs_batch = torch.stack(batch).to(device)
@@ -407,14 +407,21 @@ def init_prototypes_from_data(population, images, device, n_samples=50):
         population.proto_class[scale_idx].fill_(-1)
         
         print(f"  Échelle {scale_idx} ({patch_size[0]}×{patch_size[1]}) : "
-              f"{all_patches.shape[0]} patches → {B_scale} prototypes initialisés")
+              f"{all_patches.shape[0]} patches → {B_scale} prototypes")
 
 
 def run_experiment(train_images, train_labels, val_images, val_labels,
                    name, num_classes, epochs=40, lr=0.1,
                    num_cells=6400, patch_sizes=[(5,5), (9,9), (13,13)],
-                   theta_init=0.5, K=1, device="cuda"):
-
+                   theta_init=0.5, K=1, device="cuda",
+                   save_viz_every=5, viz_dir="figs/epoch_viz"):
+    """
+    Entraînement avec visualisations périodiques.
+    
+    Args:
+        save_viz_every: Sauvegarder visualisations tous les N epochs
+        viz_dir: Dossier de base pour visualisations
+    """
     print(f"\n{'='*50}")
     print(f"EXPÉRIENCE : {name}")
     print(f"{'='*50}")
@@ -441,11 +448,8 @@ def run_experiment(train_images, train_labels, val_images, val_labels,
     for epoch in range(epochs):
         lr_epoch = lr * (0.95 ** epoch)
         
-        trainer.train_batch(train_images, train_labels,
-                            batch_size=2, lr=lr_epoch)
-        pop.reassign_proto_class(train_images, train_labels, device,
-                                 batch_size=2)
-
+        trainer.train_batch(train_images, train_labels, batch_size=2, lr=lr_epoch)
+        pop.reassign_proto_class(train_images, train_labels, device, batch_size=2)
         preds = trainer.predict_batch(val_images, batch_size=4)
         
         correct = sum(p == l for p, l in zip(preds, val_labels) if p is not None)
@@ -471,6 +475,19 @@ def run_experiment(train_images, train_labels, val_images, val_labels,
 
         print(f"  Epoch {epoch+1:2d} | Acc: {acc:.4f} | Best: {best_acc:.4f} | "
               f"lr: {lr_epoch:.4f} {marker}")
+        
+        # ── Sauvegarder visualisations périodiquement ─────
+        if (epoch + 1) % save_viz_every == 0 or epoch == 0:
+            save_epoch_visualizations(
+                pop=pop,
+                trainer=trainer,
+                val_images=val_images,
+                val_labels=val_labels,
+                epoch=epoch + 1,
+                class_names=["Cancer", "Normal"],
+                save_dir=viz_dir,
+                n_examples=5
+            )
 
         if patience >= max_patience:
             print(f"\n  Early stopping à l'epoch {epoch+1}")
