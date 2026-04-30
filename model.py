@@ -819,6 +819,7 @@ import torch.nn.functional as F
 
 
 class PopulationBMultiScale:
+
     def __init__(self, num_cells=6400, patch_sizes=[(5,5), (9,9), (13,13)],
                  theta_init=0.5, beta=5.0, num_classes=2, K=1, 
                  use_intensity=True, device="cuda"):
@@ -1035,6 +1036,40 @@ class TrainerMultiScale:
                 all_activated, all_z, labels_t[start:end], lr
             )
 
+
+
+
+    # def predict_batch(self, images, batch_size=4):
+    #     images_t = torch.stack(images).to(self.device)
+    #     all_preds = []
+        
+    #     for start in range(0, len(images_t), batch_size):
+    #         end = min(start + batch_size, len(images_t))
+    #         all_activated, _ = self.population.process_batch(images_t[start:end])
+            
+    #         for i in range(end - start):
+    #             total_votes = torch.zeros(self.num_classes, device=self.device)
+                
+    #             for scale_idx in range(self.population.n_scales):
+    #                 act_i = all_activated[scale_idx][i]
+    #                 valid = act_i & (self.population.proto_class[scale_idx] >= 0)
+                    
+    #                 if not valid.any():
+    #                     continue
+                    
+    #                 weights, freq = self.population.get_vote_weights(scale_idx)
+    #                 active_freq = freq[valid]
+    #                 active_weights = weights[valid]
+    #                 votes = (active_freq * active_weights.unsqueeze(1)).sum(dim=0)
+    #                 total_votes += votes
+                
+    #             if total_votes.sum() == 0:
+    #                 all_preds.append(None)
+    #             else:
+    #                 all_preds.append(total_votes.argmax().item())
+        
+    #     return all_preds
+
     def predict_batch(self, images, batch_size=4):
         images_t = torch.stack(images).to(self.device)
         all_preds = []
@@ -1048,15 +1083,30 @@ class TrainerMultiScale:
                 
                 for scale_idx in range(self.population.n_scales):
                     act_i = all_activated[scale_idx][i]
-                    valid = act_i & (self.population.proto_class[scale_idx] >= 0)
+                    
+                    # ✅ Filtrer : assignés + spécialisés
+                    proto_class = self.population.proto_class[scale_idx]
+                    _, freq = self.population.get_vote_weights(scale_idx)
+                    
+                    # Spécialisation = freq pour sa propre classe
+                    specialization = torch.zeros(len(proto_class), device=self.device)
+                    for c in range(self.num_classes):
+                        mask = proto_class == c
+                        specialization[mask] = freq[mask, c]
+                    
+                    # ✅ Seuil : seulement prototypes >75% spécialisés
+                    highly_specialized = specialization > 0.75
+                    valid = act_i & (proto_class >= 0) & highly_specialized
                     
                     if not valid.any():
                         continue
                     
-                    weights, freq = self.population.get_vote_weights(scale_idx)
+                    # ✅ Vote pondéré par spécialisation
                     active_freq = freq[valid]
-                    active_weights = weights[valid]
-                    votes = (active_freq * active_weights.unsqueeze(1)).sum(dim=0)
+                    active_spec = specialization[valid]
+                    
+                    # Vote = fréquence × spécialisation
+                    votes = (active_freq * active_spec.unsqueeze(1)).sum(dim=0)
                     total_votes += votes
                 
                 if total_votes.sum() == 0:
@@ -1065,4 +1115,5 @@ class TrainerMultiScale:
                     all_preds.append(total_votes.argmax().item())
         
         return all_preds
+
 #----------------------------------------------
