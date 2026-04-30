@@ -512,36 +512,96 @@ from model import PopulationBMultiScale, TrainerMultiScale
 from interpretability import save_epoch_visualizations
 
 
-def init_prototypes_from_data(population, images, device, n_samples=50):
-    """Initialisation multi-échelle AVEC intensité."""
-    print(f"Initialisation prototypes (intensité: {population.use_intensity}, n_samples={n_samples})...")
+# def init_prototypes_from_data(population, images, device, n_samples=50):
+#     """Initialisation multi-échelle AVEC intensité."""
+#     print(f"Initialisation prototypes (intensité: {population.use_intensity}, n_samples={n_samples})...")
+    
+#     for scale_idx, patch_size in enumerate(population.patch_sizes):
+#         all_patches = []
+        
+#         # Traiter par petits batches
+#         for i in range(0, min(n_samples, len(images)), 10):
+#             batch = images[i:i+10]
+#             imgs_batch = torch.stack(batch).to(device)
+#             patches = population.extract_patches_batch(imgs_batch, patch_size)
+            
+#             # ✅ CHANGEMENT : Préprocesser AVEC intensité
+#             patches = population.preprocess_patches(patches, keep_intensity=True)
+            
+#             patches = patches.reshape(-1, patches.shape[2])
+#             all_patches.append(patches.cpu())
+#             del imgs_batch, patches
+#             torch.cuda.empty_cache()
+        
+#         all_patches = torch.cat(all_patches, dim=0)
+#         B_scale = population.B_per_scale[scale_idx]
+#         idx = torch.randperm(all_patches.shape[0])[:B_scale]
+#         population.prototypes[scale_idx] = all_patches[idx].clone().to(device)
+#         population.proto_class[scale_idx].fill_(-1)
+        
+#         D_feat = all_patches.shape[1]
+#         print(f"  Échelle {scale_idx} ({patch_size[0]}×{patch_size[1]}) : "
+#               f"{all_patches.shape[0]} patches → {B_scale} prototypes, {D_feat} features")
+
+
+# Dans train.py : init_prototypes_from_data
+# Dans train.py : Modifier appel
+
+
+def init_prototypes_from_data(population, images, labels, device, n_samples=50):
+    """Initialisation ÉQUILIBRÉE 50/50 Cancer/Normal."""
+    print(f"Initialisation prototypes équilibrée (intensité: {population.use_intensity})...")
+    
+    # ✅ Séparer images par classe
+    cancer_images = [img for img, lbl in zip(images, labels) if lbl == 0]
+    normal_images = [img for img, lbl in zip(images, labels) if lbl == 1]
     
     for scale_idx, patch_size in enumerate(population.patch_sizes):
-        all_patches = []
+        all_patches_cancer = []
+        all_patches_normal = []
         
-        # Traiter par petits batches
-        for i in range(0, min(n_samples, len(images)), 10):
-            batch = images[i:i+10]
+        # ✅ Extraire patches Cancer
+        for i in range(0, min(n_samples//2, len(cancer_images)), 10):
+            batch = cancer_images[i:i+10]
             imgs_batch = torch.stack(batch).to(device)
             patches = population.extract_patches_batch(imgs_batch, patch_size)
-            
-            # ✅ CHANGEMENT : Préprocesser AVEC intensité
             patches = population.preprocess_patches(patches, keep_intensity=True)
-            
-            patches = patches.reshape(-1, patches.shape[2])
-            all_patches.append(patches.cpu())
+            all_patches_cancer.append(patches.reshape(-1, patches.shape[2]).cpu())
             del imgs_batch, patches
             torch.cuda.empty_cache()
         
-        all_patches = torch.cat(all_patches, dim=0)
+        # ✅ Extraire patches Normal
+        for i in range(0, min(n_samples//2, len(normal_images)), 10):
+            batch = normal_images[i:i+10]
+            imgs_batch = torch.stack(batch).to(device)
+            patches = population.extract_patches_batch(imgs_batch, patch_size)
+            patches = population.preprocess_patches(patches, keep_intensity=True)
+            all_patches_normal.append(patches.reshape(-1, patches.shape[2]).cpu())
+            del imgs_batch, patches
+            torch.cuda.empty_cache()
+        
+        all_patches_cancer = torch.cat(all_patches_cancer, dim=0)
+        all_patches_normal = torch.cat(all_patches_normal, dim=0)
+        
         B_scale = population.B_per_scale[scale_idx]
-        idx = torch.randperm(all_patches.shape[0])[:B_scale]
-        population.prototypes[scale_idx] = all_patches[idx].clone().to(device)
+        B_cancer = B_scale // 2
+        B_normal = B_scale - B_cancer
+        
+        # ✅ Initialiser 50% Cancer, 50% Normal
+        idx_cancer = torch.randperm(all_patches_cancer.shape[0])[:B_cancer]
+        idx_normal = torch.randperm(all_patches_normal.shape[0])[:B_normal]
+        
+        protos_init = torch.cat([
+            all_patches_cancer[idx_cancer],
+            all_patches_normal[idx_normal]
+        ], dim=0).to(device)
+        
+        population.prototypes[scale_idx] = protos_init
         population.proto_class[scale_idx].fill_(-1)
         
-        D_feat = all_patches.shape[1]
         print(f"  Échelle {scale_idx} ({patch_size[0]}×{patch_size[1]}) : "
-              f"{all_patches.shape[0]} patches → {B_scale} prototypes, {D_feat} features")
+              f"{B_cancer} Cancer + {B_normal} Normal = {B_scale} protos")
+
 
 
 def run_experiment(train_images, train_labels, val_images, val_labels,
@@ -571,7 +631,9 @@ def run_experiment(train_images, train_labels, val_images, val_labels,
         device        = device
     )
     trainer = TrainerMultiScale(population=pop, num_classes=num_classes, device=device)
-    init_prototypes_from_data(pop, train_images, device, n_samples=50)
+    # init_prototypes_from_data(pop, train_images, device, n_samples=50)
+    # Dans train.py : Modifier appel
+    init_prototypes_from_data(pop, train_images, train_labels, device, n_samples=50)
 
     best_acc     = 0.0
     best_protos  = [p.clone() for p in pop.prototypes]
@@ -633,3 +695,6 @@ def run_experiment(train_images, train_labels, val_images, val_labels,
     pop.proto_class  = [c.clone() for c in best_classes]
     print(f"\n>>> BEST ACCURACY [{name}]: {best_acc:.4f}")
     return best_acc, pop, trainer, history
+
+
+#---------------------------------------------
