@@ -548,11 +548,99 @@ from interpretability import save_epoch_visualizations
 # Dans train.py : Modifier appel
 
 
-def init_prototypes_from_data(population, images, labels, device, n_samples=50):
-    """Initialisation ÉQUILIBRÉE 50/50 Cancer/Normal."""
-    print(f"Initialisation prototypes équilibrée (intensité: {population.use_intensity})...")
+# def init_prototypes_from_data(population, images, labels, device, n_samples=50):
+#     """Initialisation ÉQUILIBRÉE 50/50 Cancer/Normal."""
+#     print(f"Initialisation prototypes équilibrée (intensité: {population.use_intensity})...")
     
-    # ✅ Séparer images par classe
+#     # ✅ Séparer images par classe
+#     cancer_images = [img for img, lbl in zip(images, labels) if lbl == 0]
+#     normal_images = [img for img, lbl in zip(images, labels) if lbl == 1]
+    
+#     for scale_idx, patch_size in enumerate(population.patch_sizes):
+#         all_patches_cancer = []
+#         all_patches_normal = []
+        
+#         # ✅ Extraire patches Cancer
+#         for i in range(0, min(n_samples//2, len(cancer_images)), 10):
+#             batch = cancer_images[i:i+10]
+#             imgs_batch = torch.stack(batch).to(device)
+#             patches = population.extract_patches_batch(imgs_batch, patch_size)
+#             patches = population.preprocess_patches(patches, keep_intensity=True)
+#             all_patches_cancer.append(patches.reshape(-1, patches.shape[2]).cpu())
+#             del imgs_batch, patches
+#             torch.cuda.empty_cache()
+        
+#         # ✅ Extraire patches Normal
+#         for i in range(0, min(n_samples//2, len(normal_images)), 10):
+#             batch = normal_images[i:i+10]
+#             imgs_batch = torch.stack(batch).to(device)
+#             patches = population.extract_patches_batch(imgs_batch, patch_size)
+#             patches = population.preprocess_patches(patches, keep_intensity=True)
+#             all_patches_normal.append(patches.reshape(-1, patches.shape[2]).cpu())
+#             del imgs_batch, patches
+#             torch.cuda.empty_cache()
+        
+#         all_patches_cancer = torch.cat(all_patches_cancer, dim=0)
+#         all_patches_normal = torch.cat(all_patches_normal, dim=0)
+        
+#         B_scale = population.B_per_scale[scale_idx]
+#         B_cancer = B_scale // 2
+#         B_normal = B_scale - B_cancer
+        
+#         # ✅ Initialiser 50% Cancer, 50% Normal
+#         idx_cancer = torch.randperm(all_patches_cancer.shape[0])[:B_cancer]
+#         idx_normal = torch.randperm(all_patches_normal.shape[0])[:B_normal]
+        
+#         protos_init = torch.cat([
+#             all_patches_cancer[idx_cancer],
+#             all_patches_normal[idx_normal]
+#         ], dim=0).to(device)
+        
+#         population.prototypes[scale_idx] = protos_init
+#         population.proto_class[scale_idx].fill_(-1)
+        
+#         print(f"  Échelle {scale_idx} ({patch_size[0]}×{patch_size[1]}) : "
+#               f"{B_cancer} Cancer + {B_normal} Normal = {B_scale} protos")
+
+
+# def init_prototypes_from_data(population, images, labels, device, n_samples=50):
+#     for scale_idx, patch_size in enumerate(population.patch_sizes):
+#         all_patches_cancer = []
+#         all_patches_normal = []
+        
+#         cancer_images = [img for img, lbl in zip(images, labels) if lbl == 0]
+#         normal_images = [img for img, lbl in zip(images, labels) if lbl == 1]
+        
+#         for imgs, patches_list in [(cancer_images, all_patches_cancer), 
+#                                      (normal_images, all_patches_normal)]:
+#             for i in range(0, min(n_samples//2, len(imgs)), 10):
+#                 batch = imgs[i:i+10]
+#                 imgs_batch = torch.stack(batch).to(device)
+#                 patches = population.extract_patches_batch(imgs_batch, patch_size)
+                
+#                 # ✅ FILTRER patches informatifs (variance > seuil)
+#                 patches_raw = patches  # Avant normalisation
+#                 variance = patches_raw.var(dim=-1)  # Variance par patch
+                
+#                 # Garder seulement patches avec texture (variance > 0.01)
+#                 informative_mask = variance > 0.01
+#                 patches_filtered = patches[informative_mask]
+                
+#                 if patches_filtered.shape[0] == 0:
+#                     continue
+                
+#                 # Normaliser patches informatifs
+#                 patches_std = population.preprocess_patches(
+#                     patches_filtered.unsqueeze(0), keep_intensity=True
+#                 ).squeeze(0)
+                
+#                 patches_list.append(patches_std.cpu())
+
+
+def init_prototypes_from_data(population, images, labels, device, n_samples=50):
+    """Initialisation ÉQUILIBRÉE + patches informatifs."""
+    print(f"Initialisation (intensité: {population.use_intensity}, filtre variance)...")
+    
     cancer_images = [img for img, lbl in zip(images, labels) if lbl == 0]
     normal_images = [img for img, lbl in zip(images, labels) if lbl == 1]
     
@@ -560,49 +648,51 @@ def init_prototypes_from_data(population, images, labels, device, n_samples=50):
         all_patches_cancer = []
         all_patches_normal = []
         
-        # ✅ Extraire patches Cancer
-        for i in range(0, min(n_samples//2, len(cancer_images)), 10):
-            batch = cancer_images[i:i+10]
-            imgs_batch = torch.stack(batch).to(device)
-            patches = population.extract_patches_batch(imgs_batch, patch_size)
-            patches = population.preprocess_patches(patches, keep_intensity=True)
-            all_patches_cancer.append(patches.reshape(-1, patches.shape[2]).cpu())
-            del imgs_batch, patches
-            torch.cuda.empty_cache()
+        for imgs, patches_list in [(cancer_images, all_patches_cancer), 
+                                     (normal_images, all_patches_normal)]:
+            for i in range(0, min(n_samples//2, len(imgs)), 10):
+                batch = imgs[i:i+10]
+                imgs_batch = torch.stack(batch).to(device)
+                patches = population.extract_patches_batch(imgs_batch, patch_size)
+                
+                # ✅ Filtrer patches informatifs
+                variance = patches.var(dim=-1)
+                informative = variance > 0.01
+                patches_filtered = patches[informative]
+                
+                if patches_filtered.shape[0] == 0:
+                    continue
+                
+                # Normaliser
+                patches_std = population.preprocess_patches(
+                    patches_filtered.unsqueeze(0), keep_intensity=True
+                ).squeeze(0)
+                
+                patches_list.append(patches_std.cpu())
+                del imgs_batch, patches
+                torch.cuda.empty_cache()
         
-        # ✅ Extraire patches Normal
-        for i in range(0, min(n_samples//2, len(normal_images)), 10):
-            batch = normal_images[i:i+10]
-            imgs_batch = torch.stack(batch).to(device)
-            patches = population.extract_patches_batch(imgs_batch, patch_size)
-            patches = population.preprocess_patches(patches, keep_intensity=True)
-            all_patches_normal.append(patches.reshape(-1, patches.shape[2]).cpu())
-            del imgs_batch, patches
-            torch.cuda.empty_cache()
-        
-        all_patches_cancer = torch.cat(all_patches_cancer, dim=0)
-        all_patches_normal = torch.cat(all_patches_normal, dim=0)
+        # ✅ Concaténer et initialiser 50/50
+        all_patches_cancer = torch.cat(all_patches_cancer, dim=0) if all_patches_cancer else torch.empty(0, 26)
+        all_patches_normal = torch.cat(all_patches_normal, dim=0) if all_patches_normal else torch.empty(0, 26)
         
         B_scale = population.B_per_scale[scale_idx]
         B_cancer = B_scale // 2
         B_normal = B_scale - B_cancer
         
-        # ✅ Initialiser 50% Cancer, 50% Normal
-        idx_cancer = torch.randperm(all_patches_cancer.shape[0])[:B_cancer]
-        idx_normal = torch.randperm(all_patches_normal.shape[0])[:B_normal]
+        idx_cancer = torch.randperm(all_patches_cancer.shape[0])[:B_cancer] if all_patches_cancer.shape[0] > 0 else torch.empty(0, dtype=torch.long)
+        idx_normal = torch.randperm(all_patches_normal.shape[0])[:B_normal] if all_patches_normal.shape[0] > 0 else torch.empty(0, dtype=torch.long)
         
         protos_init = torch.cat([
-            all_patches_cancer[idx_cancer],
-            all_patches_normal[idx_normal]
+            all_patches_cancer[idx_cancer] if len(idx_cancer) > 0 else torch.empty(0, all_patches_cancer.shape[1]),
+            all_patches_normal[idx_normal] if len(idx_normal) > 0 else torch.empty(0, all_patches_normal.shape[1])
         ], dim=0).to(device)
         
         population.prototypes[scale_idx] = protos_init
         population.proto_class[scale_idx].fill_(-1)
         
         print(f"  Échelle {scale_idx} ({patch_size[0]}×{patch_size[1]}) : "
-              f"{B_cancer} Cancer + {B_normal} Normal = {B_scale} protos")
-
-
+              f"{len(idx_cancer)} Cancer + {len(idx_normal)} Normal = {B_scale} protos")
 
 def run_experiment(train_images, train_labels, val_images, val_labels,
                    name, num_classes, epochs=40, lr=0.1,
@@ -616,6 +706,13 @@ def run_experiment(train_images, train_labels, val_images, val_labels,
     Args:
         use_intensity: Activer la feature intensité (texture + contraste)
     """
+
+    # Sélectionner 10 images FIXES pour tout le training
+    viz_indices = [0, 10, 20, 30, 40, 100, 150, 200, 250, 300]
+    viz_images = [val_images[i] for i in viz_indices]
+    viz_labels = [val_labels[i] for i in viz_indices]
+
+
     print(f"\n{'='*50}")
     print(f"EXPÉRIENCE : {name}")
     print(f"{'='*50}")
@@ -635,11 +732,20 @@ def run_experiment(train_images, train_labels, val_images, val_labels,
     # Dans train.py : Modifier appel
     init_prototypes_from_data(pop, train_images, train_labels, device, n_samples=50)
 
+    # ✅ Visualiser EPOCH 0 (juste après init, avant training)
+    print("\n[Epoch 0] Visualisation AVANT entraînement...")
+    save_epoch_visualizations(
+        pop=pop, trainer=trainer,
+        val_images=viz_images, val_labels=viz_labels,
+        epoch=0, class_names=["Cancer", "Normal"],
+        save_dir=viz_dir, n_examples=10
+    )
+
     best_acc     = 0.0
     best_protos  = [p.clone() for p in pop.prototypes]
     best_counts  = [c.clone() for c in pop.class_counts]
     best_classes = [c.clone() for c in pop.proto_class]
-    patience, max_patience = 0, 7
+    patience, max_patience = 0, 15
     history = []
 
     for epoch in range(epochs):
@@ -678,12 +784,12 @@ def run_experiment(train_images, train_labels, val_images, val_labels,
             save_epoch_visualizations(
                 pop=pop,
                 trainer=trainer,
-                val_images=val_images,
-                val_labels=val_labels,
+                val_images=viz_images,
+                val_labels=viz_labels,
                 epoch=epoch + 1,
                 class_names=["Cancer", "Normal"],
                 save_dir=viz_dir,
-                n_examples=5
+                n_examples=10
             )
 
         if patience >= max_patience:
