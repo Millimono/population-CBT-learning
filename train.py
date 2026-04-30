@@ -637,9 +637,67 @@ from interpretability import save_epoch_visualizations
 #                 patches_list.append(patches_std.cpu())
 
 
+# def init_prototypes_from_data(population, images, labels, device, n_samples=50):
+#     """Initialisation ÉQUILIBRÉE + patches informatifs."""
+#     print(f"Initialisation (intensité: {population.use_intensity}, filtre variance)...")
+    
+#     cancer_images = [img for img, lbl in zip(images, labels) if lbl == 0]
+#     normal_images = [img for img, lbl in zip(images, labels) if lbl == 1]
+    
+#     for scale_idx, patch_size in enumerate(population.patch_sizes):
+#         all_patches_cancer = []
+#         all_patches_normal = []
+        
+#         for imgs, patches_list in [(cancer_images, all_patches_cancer), 
+#                                      (normal_images, all_patches_normal)]:
+#             for i in range(0, min(n_samples//2, len(imgs)), 10):
+#                 batch = imgs[i:i+10]
+#                 imgs_batch = torch.stack(batch).to(device)
+#                 patches = population.extract_patches_batch(imgs_batch, patch_size)
+                
+#                 # ✅ Filtrer patches informatifs
+#                 variance = patches.var(dim=-1)
+#                 informative = variance > 0.01
+#                 patches_filtered = patches[informative]
+                
+#                 if patches_filtered.shape[0] == 0:
+#                     continue
+                
+#                 # Normaliser
+#                 patches_std = population.preprocess_patches(
+#                     patches_filtered.unsqueeze(0), keep_intensity=True
+#                 ).squeeze(0)
+                
+#                 patches_list.append(patches_std.cpu())
+#                 del imgs_batch, patches
+#                 torch.cuda.empty_cache()
+        
+#         # ✅ Concaténer et initialiser 50/50
+#         all_patches_cancer = torch.cat(all_patches_cancer, dim=0) if all_patches_cancer else torch.empty(0, 26)
+#         all_patches_normal = torch.cat(all_patches_normal, dim=0) if all_patches_normal else torch.empty(0, 26)
+        
+#         B_scale = population.B_per_scale[scale_idx]
+#         B_cancer = B_scale // 2
+#         B_normal = B_scale - B_cancer
+        
+#         idx_cancer = torch.randperm(all_patches_cancer.shape[0])[:B_cancer] if all_patches_cancer.shape[0] > 0 else torch.empty(0, dtype=torch.long)
+#         idx_normal = torch.randperm(all_patches_normal.shape[0])[:B_normal] if all_patches_normal.shape[0] > 0 else torch.empty(0, dtype=torch.long)
+        
+#         protos_init = torch.cat([
+#             all_patches_cancer[idx_cancer] if len(idx_cancer) > 0 else torch.empty(0, all_patches_cancer.shape[1]),
+#             all_patches_normal[idx_normal] if len(idx_normal) > 0 else torch.empty(0, all_patches_normal.shape[1])
+#         ], dim=0).to(device)
+        
+#         population.prototypes[scale_idx] = protos_init
+#         population.proto_class[scale_idx].fill_(-1)
+        
+#         print(f"  Échelle {scale_idx} ({patch_size[0]}×{patch_size[1]}) : "
+#               f"{len(idx_cancer)} Cancer + {len(idx_normal)} Normal = {B_scale} protos")
+
+
 def init_prototypes_from_data(population, images, labels, device, n_samples=50):
-    """Initialisation ÉQUILIBRÉE + patches informatifs."""
-    print(f"Initialisation (intensité: {population.use_intensity}, filtre variance)...")
+    """Init avec filtrage STRICT adaptatif."""
+    print(f"Initialisation STRICTE (intensité: {population.use_intensity})...")
     
     cancer_images = [img for img, lbl in zip(images, labels) if lbl == 0]
     normal_images = [img for img, lbl in zip(images, labels) if lbl == 1]
@@ -655,9 +713,16 @@ def init_prototypes_from_data(population, images, labels, device, n_samples=50):
                 imgs_batch = torch.stack(batch).to(device)
                 patches = population.extract_patches_batch(imgs_batch, patch_size)
                 
-                # ✅ Filtrer patches informatifs
+                # ✅ Calculer variance
                 variance = patches.var(dim=-1)
-                informative = variance > 0.01
+                
+                # ✅ SEUIL ADAPTATIF : garder top 25% des patches les plus texturés
+                if variance.numel() > 0:
+                    threshold = torch.quantile(variance.flatten(), 0.75)
+                    informative = variance > threshold
+                else:
+                    continue
+                
                 patches_filtered = patches[informative]
                 
                 if patches_filtered.shape[0] == 0:
@@ -672,7 +737,7 @@ def init_prototypes_from_data(population, images, labels, device, n_samples=50):
                 del imgs_batch, patches
                 torch.cuda.empty_cache()
         
-        # ✅ Concaténer et initialiser 50/50
+        # Concaténer
         all_patches_cancer = torch.cat(all_patches_cancer, dim=0) if all_patches_cancer else torch.empty(0, 26)
         all_patches_normal = torch.cat(all_patches_normal, dim=0) if all_patches_normal else torch.empty(0, 26)
         
@@ -680,19 +745,21 @@ def init_prototypes_from_data(population, images, labels, device, n_samples=50):
         B_cancer = B_scale // 2
         B_normal = B_scale - B_cancer
         
+        # Échantillonner
         idx_cancer = torch.randperm(all_patches_cancer.shape[0])[:B_cancer] if all_patches_cancer.shape[0] > 0 else torch.empty(0, dtype=torch.long)
         idx_normal = torch.randperm(all_patches_normal.shape[0])[:B_normal] if all_patches_normal.shape[0] > 0 else torch.empty(0, dtype=torch.long)
         
         protos_init = torch.cat([
-            all_patches_cancer[idx_cancer] if len(idx_cancer) > 0 else torch.empty(0, all_patches_cancer.shape[1]),
-            all_patches_normal[idx_normal] if len(idx_normal) > 0 else torch.empty(0, all_patches_normal.shape[1])
+            all_patches_cancer[idx_cancer] if len(idx_cancer) > 0 else torch.empty(0, all_patches_cancer.shape[1] if all_patches_cancer.shape[0] > 0 else 26),
+            all_patches_normal[idx_normal] if len(idx_normal) > 0 else torch.empty(0, all_patches_normal.shape[1] if all_patches_normal.shape[0] > 0 else 26)
         ], dim=0).to(device)
         
         population.prototypes[scale_idx] = protos_init
         population.proto_class[scale_idx].fill_(-1)
         
         print(f"  Échelle {scale_idx} ({patch_size[0]}×{patch_size[1]}) : "
-              f"{len(idx_cancer)} Cancer + {len(idx_normal)} Normal = {B_scale} protos")
+              f"{len(idx_cancer)} Cancer + {len(idx_normal)} Normal = {B_scale} protos [Top 25%]")
+
 
 def run_experiment(train_images, train_labels, val_images, val_labels,
                    name, num_classes, epochs=40, lr=0.1,
@@ -745,7 +812,7 @@ def run_experiment(train_images, train_labels, val_images, val_labels,
     best_protos  = [p.clone() for p in pop.prototypes]
     best_counts  = [c.clone() for c in pop.class_counts]
     best_classes = [c.clone() for c in pop.proto_class]
-    patience, max_patience = 0, 15
+    patience, max_patience = 0, 7
     history = []
 
     for epoch in range(epochs):
