@@ -910,21 +910,106 @@ class PopulationBMultiScale:
         
         return all_activated, all_z
 
-    def update_batch_gradient_vectorized(self, all_activated, all_z, labels, lr=0.05, 
-                                          entropy_weight=0.1):
-        """
-        Gradient descent avec PÉNALITÉ ENTROPIE pour forcer spécialisation.
+
+
+    # def update_batch_gradient_vectorized(self, all_activated, all_z, labels, lr=0.05, 
+    #                                       entropy_weight=0.1):
+    #     """
+    #     Gradient descent avec PÉNALITÉ ENTROPIE pour forcer spécialisation.
         
-        Args:
-            entropy_weight: Coefficient pénalité entropie (0.1 par défaut)
+    #     Args:
+    #         entropy_weight: Coefficient pénalité entropie (0.1 par défaut)
+    #     """
+    #     N = len(labels)
+        
+    #     for scale_idx in range(self.n_scales):
+    #         activated = all_activated[scale_idx]
+    #         z = all_z[scale_idx]
+            
+    #         # Mettre à jour compteurs
+    #         for i in range(N):
+    #             lbl = labels[i].item()
+    #             act = activated[i]
+    #             if not act.any():
+    #                 continue
+                
+    #             self.class_counts[scale_idx][act] *= 0.99
+    #             self.class_counts[scale_idx][act, lbl] += 1
+            
+    #         # Réassigner classes
+    #         self.proto_class[scale_idx] = self.class_counts[scale_idx].argmax(dim=1)
+    #         self.proto_class[scale_idx][self.class_counts[scale_idx].sum(dim=1) == 0] = -1
+            
+    #         # ✅ GRADIENT CONTRASTIVE
+    #         proto_grads = torch.zeros_like(self.prototypes[scale_idx])
+    #         margin = 1.0
+            
+    #         for i in range(N):
+    #             lbl = labels[i].item()
+    #             act_i = activated[i]
+                
+    #             if not act_i.any():
+    #                 continue
+                
+    #             protos_active = self.prototypes[scale_idx][act_i]
+    #             z_active = z[i][act_i]
+    #             classes_active = self.proto_class[scale_idx][act_i]
+                
+    #             diff = protos_active - z_active
+    #             dist_sq = (diff ** 2).sum(dim=1)
+                
+    #             same_class = (classes_active == lbl) & (classes_active >= 0)
+    #             diff_class = (classes_active != lbl) & (classes_active >= 0)
+                
+    #             grads_active = torch.zeros_like(diff)
+    #             grads_active[same_class] = 2 * diff[same_class]
+                
+    #             need_repel = diff_class & (dist_sq < margin)
+    #             grads_active[need_repel] = -2 * diff[need_repel]
+                
+    #             active_indices = torch.where(act_i)[0]
+    #             proto_grads.index_add_(0, active_indices, grads_active)
+            
+    #         # ✅ PÉNALITÉ ENTROPIE (forcer spécialisation)
+    #         _, freq = self.get_vote_weights(scale_idx)
+            
+    #         # Calculer entropie : -sum(p * log(p))
+    #         # Entropie faible = spécialisé [0.95, 0.05]
+    #         # Entropie élevée = ambigu [0.5, 0.5]
+    #         freq_safe = freq.clamp(min=1e-8)  # Éviter log(0)
+    #         entropy = -(freq_safe * torch.log(freq_safe)).sum(dim=1)  # (B,)
+            
+    #         # Gradient entropie pousse vers réduction entropie = spécialisation
+    #         # Pour chaque prototype, on veut augmenter la freq de sa classe dominante
+    #         max_class = freq.argmax(dim=1)  # (B,)
+            
+    #         # Gradient simplifié : pousser vers classe dominante
+    #         entropy_grad = torch.zeros_like(self.prototypes[scale_idx])
+    #         for proto_idx in range(self.prototypes[scale_idx].shape[0]):
+    #             if self.proto_class[scale_idx][proto_idx] >= 0:
+    #                 # Pénalité proportionnelle à l'entropie
+    #                 entropy_grad[proto_idx] = entropy[proto_idx] * proto_grads[proto_idx].sign()
+            
+    #         # ✅ Combiner gradients
+    #         total_grads = proto_grads + entropy_weight * entropy_grad
+            
+    #         # Mise à jour
+    #         self.prototypes[scale_idx] -= lr * total_grads
+    #         self.prototypes[scale_idx].clamp_(-5.0, 5.0)
+
+
+    def update_batch_gradient_vectorized(self, all_activated, all_z, labels, lr=0.05, 
+                                      entropy_weight=0.1):
+        """
+        Gradient descent 100% VECTORISÉ GPU avec pénalité entropie.
         """
         N = len(labels)
         
         for scale_idx in range(self.n_scales):
-            activated = all_activated[scale_idx]
-            z = all_z[scale_idx]
+            activated = all_activated[scale_idx]  # (N, B)
+            z = all_z[scale_idx]                   # (N, B, D)
             
-            # Mettre à jour compteurs
+            # ✅ Mettre à jour compteurs (vectorisé)
             for i in range(N):
                 lbl = labels[i].item()
                 act = activated[i]
@@ -938,60 +1023,63 @@ class PopulationBMultiScale:
             self.proto_class[scale_idx] = self.class_counts[scale_idx].argmax(dim=1)
             self.proto_class[scale_idx][self.class_counts[scale_idx].sum(dim=1) == 0] = -1
             
-            # ✅ GRADIENT CONTRASTIVE
-            proto_grads = torch.zeros_like(self.prototypes[scale_idx])
+            # ✅ CALCUL GRADIENTS CONTRASTIFS VECTORISÉ
+            proto_grads = torch.zeros_like(self.prototypes[scale_idx])  # (B, D)
             margin = 1.0
             
             for i in range(N):
                 lbl = labels[i].item()
-                act_i = activated[i]
+                act_i = activated[i]  # (B,) booléen
                 
                 if not act_i.any():
                     continue
                 
-                protos_active = self.prototypes[scale_idx][act_i]
-                z_active = z[i][act_i]
-                classes_active = self.proto_class[scale_idx][act_i]
+                # Prototypes activés
+                protos_active = self.prototypes[scale_idx][act_i]  # (n_active, D)
+                z_active = z[i][act_i]                              # (n_active, D)
+                classes_active = self.proto_class[scale_idx][act_i] # (n_active,)
                 
-                diff = protos_active - z_active
-                dist_sq = (diff ** 2).sum(dim=1)
+                # ✅ Différence vectorisée
+                diff = protos_active - z_active  # (n_active, D)
+                dist_sq = (diff ** 2).sum(dim=1)  # (n_active,)
                 
-                same_class = (classes_active == lbl) & (classes_active >= 0)
-                diff_class = (classes_active != lbl) & (classes_active >= 0)
+                # ✅ Masques vectorisés
+                same_class = (classes_active == lbl) & (classes_active >= 0)  # (n_active,)
+                diff_class = (classes_active != lbl) & (classes_active >= 0)  # (n_active,)
                 
-                grads_active = torch.zeros_like(diff)
+                # ✅ Gradients vectorisés
+                grads_active = torch.zeros_like(diff)  # (n_active, D)
+                
+                # Même classe : grad = 2 * diff (rapprocher)
                 grads_active[same_class] = 2 * diff[same_class]
                 
+                # Classe différente : grad = -2 * diff si distance < margin (éloigner)
                 need_repel = diff_class & (dist_sq < margin)
                 grads_active[need_repel] = -2 * diff[need_repel]
                 
+                # ✅ Accumuler dans proto_grads
                 active_indices = torch.where(act_i)[0]
                 proto_grads.index_add_(0, active_indices, grads_active)
             
-            # ✅ PÉNALITÉ ENTROPIE (forcer spécialisation)
+            # ✅ PÉNALITÉ ENTROPIE VECTORISÉE (CORRIGÉ - RAPIDE)
             _, freq = self.get_vote_weights(scale_idx)
             
             # Calculer entropie : -sum(p * log(p))
-            # Entropie faible = spécialisé [0.95, 0.05]
-            # Entropie élevée = ambigu [0.5, 0.5]
-            freq_safe = freq.clamp(min=1e-8)  # Éviter log(0)
+            freq_safe = freq.clamp(min=1e-8)
             entropy = -(freq_safe * torch.log(freq_safe)).sum(dim=1)  # (B,)
             
-            # Gradient entropie pousse vers réduction entropie = spécialisation
-            # Pour chaque prototype, on veut augmenter la freq de sa classe dominante
-            max_class = freq.argmax(dim=1)  # (B,)
+            # ✅ Gradient entropie vectorisé (pas de boucle Python)
+            assigned_mask = self.proto_class[scale_idx] >= 0  # (B,) booléen
             
-            # Gradient simplifié : pousser vers classe dominante
             entropy_grad = torch.zeros_like(self.prototypes[scale_idx])
-            for proto_idx in range(self.prototypes[scale_idx].shape[0]):
-                if self.proto_class[scale_idx][proto_idx] >= 0:
-                    # Pénalité proportionnelle à l'entropie
-                    entropy_grad[proto_idx] = entropy[proto_idx] * proto_grads[proto_idx].sign()
+            entropy_grad[assigned_mask] = (
+                entropy[assigned_mask].unsqueeze(1) * proto_grads[assigned_mask].sign()
+            )
             
             # ✅ Combiner gradients
             total_grads = proto_grads + entropy_weight * entropy_grad
             
-            # Mise à jour
+            # ✅ Mise à jour GPU vectorisée
             self.prototypes[scale_idx] -= lr * total_grads
             self.prototypes[scale_idx].clamp_(-5.0, 5.0)
 
