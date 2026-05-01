@@ -811,7 +811,7 @@
 
 
 # ============================================================
-# model.py — Gradient descent VECTORISÉ GPU
+# model.py — Gradient descent + Entropie + Hard assignment
 # ============================================================
 
 import torch
@@ -910,18 +910,21 @@ class PopulationBMultiScale:
         
         return all_activated, all_z
 
-    def update_batch_gradient_vectorized(self, all_activated, all_z, labels, lr=0.05):
+    def update_batch_gradient_vectorized(self, all_activated, all_z, labels, lr=0.05, 
+                                          entropy_weight=0.1):
         """
-        Gradient descent 100% VECTORISÉ GPU.
-        ZERO boucle Python sur prototypes.
+        Gradient descent avec PÉNALITÉ ENTROPIE pour forcer spécialisation.
+        
+        Args:
+            entropy_weight: Coefficient pénalité entropie (0.1 par défaut)
         """
         N = len(labels)
         
         for scale_idx in range(self.n_scales):
-            activated = all_activated[scale_idx]  # (N, B)
-            z = all_z[scale_idx]                   # (N, B, D)
+            activated = all_activated[scale_idx]
+            z = all_z[scale_idx]
             
-            # ✅ Mettre à jour compteurs (vectorisé)
+            # Mettre à jour compteurs
             for i in range(N):
                 lbl = labels[i].item()
                 act = activated[i]
@@ -935,47 +938,95 @@ class PopulationBMultiScale:
             self.proto_class[scale_idx] = self.class_counts[scale_idx].argmax(dim=1)
             self.proto_class[scale_idx][self.class_counts[scale_idx].sum(dim=1) == 0] = -1
             
-            # ✅ CALCUL GRADIENTS VECTORISÉ
-            proto_grads = torch.zeros_like(self.prototypes[scale_idx])  # (B, D)
+            # ✅ GRADIENT CONTRASTIVE
+            proto_grads = torch.zeros_like(self.prototypes[scale_idx])
             margin = 1.0
             
             for i in range(N):
                 lbl = labels[i].item()
-                act_i = activated[i]  # (B,) booléen
+                act_i = activated[i]
                 
                 if not act_i.any():
                     continue
                 
-                # Prototypes activés
-                protos_active = self.prototypes[scale_idx][act_i]  # (n_active, D)
-                z_active = z[i][act_i]                              # (n_active, D)
-                classes_active = self.proto_class[scale_idx][act_i] # (n_active,)
+                protos_active = self.prototypes[scale_idx][act_i]
+                z_active = z[i][act_i]
+                classes_active = self.proto_class[scale_idx][act_i]
                 
-                # ✅ Différence vectorisée
-                diff = protos_active - z_active  # (n_active, D)
-                dist_sq = (diff ** 2).sum(dim=1)  # (n_active,)
+                diff = protos_active - z_active
+                dist_sq = (diff ** 2).sum(dim=1)
                 
-                # ✅ Masques vectorisés
-                same_class = (classes_active == lbl) & (classes_active >= 0)  # (n_active,)
-                diff_class = (classes_active != lbl) & (classes_active >= 0)  # (n_active,)
+                same_class = (classes_active == lbl) & (classes_active >= 0)
+                diff_class = (classes_active != lbl) & (classes_active >= 0)
                 
-                # ✅ Gradients vectorisés
-                grads_active = torch.zeros_like(diff)  # (n_active, D)
-                
-                # Même classe : grad = 2 * diff (rapprocher)
+                grads_active = torch.zeros_like(diff)
                 grads_active[same_class] = 2 * diff[same_class]
                 
-                # Classe différente : grad = -2 * diff si distance < margin (éloigner)
                 need_repel = diff_class & (dist_sq < margin)
                 grads_active[need_repel] = -2 * diff[need_repel]
                 
-                # ✅ Accumuler dans proto_grads (scatter_add pour indices activés)
-                active_indices = torch.where(act_i)[0]  # Indices des prototypes activés
+                active_indices = torch.where(act_i)[0]
                 proto_grads.index_add_(0, active_indices, grads_active)
             
-            # ✅ Mise à jour GPU vectorisée
-            self.prototypes[scale_idx] -= lr * proto_grads
+            # ✅ PÉNALITÉ ENTROPIE (forcer spécialisation)
+            _, freq = self.get_vote_weights(scale_idx)
+            
+            # Calculer entropie : -sum(p * log(p))
+            # Entropie faible = spécialisé [0.95, 0.05]
+            # Entropie élevée = ambigu [0.5, 0.5]
+            freq_safe = freq.clamp(min=1e-8)  # Éviter log(0)
+            entropy = -(freq_safe * torch.log(freq_safe)).sum(dim=1)  # (B,)
+            
+            # Gradient entropie pousse vers réduction entropie = spécialisation
+            # Pour chaque prototype, on veut augmenter la freq de sa classe dominante
+            max_class = freq.argmax(dim=1)  # (B,)
+            
+            # Gradient simplifié : pousser vers classe dominante
+            entropy_grad = torch.zeros_like(self.prototypes[scale_idx])
+            for proto_idx in range(self.prototypes[scale_idx].shape[0]):
+                if self.proto_class[scale_idx][proto_idx] >= 0:
+                    # Pénalité proportionnelle à l'entropie
+                    entropy_grad[proto_idx] = entropy[proto_idx] * proto_grads[proto_idx].sign()
+            
+            # ✅ Combiner gradients
+            total_grads = proto_grads + entropy_weight * entropy_grad
+            
+            # Mise à jour
+            self.prototypes[scale_idx] -= lr * total_grads
             self.prototypes[scale_idx].clamp_(-5.0, 5.0)
+
+    def hard_reset_ambiguous(self, threshold=0.70):
+        """
+        RESET prototypes ambigus (spécialisation < threshold).
+        À appeler tous les 2 epochs.
+        """
+        n_reset_total = 0
+        
+        for scale_idx in range(self.n_scales):
+            _, freq = self.get_vote_weights(scale_idx)
+            specialization = freq.max(dim=1).values  # Spécialisation par proto
+            
+            # Identifier prototypes ambigus
+            ambiguous = specialization < threshold
+            n_ambiguous = ambiguous.sum().item()
+            
+            if n_ambiguous > 0:
+                # RESET : réinitialiser aléatoirement
+                self.prototypes[scale_idx][ambiguous] = torch.randn_like(
+                    self.prototypes[scale_idx][ambiguous]
+                ) * 0.1
+                
+                # Réinitialiser compteurs
+                self.class_counts[scale_idx][ambiguous] = 0
+                self.proto_class[scale_idx][ambiguous] = -1
+                
+                n_reset_total += n_ambiguous
+            
+            ps = self.patch_sizes[scale_idx]
+            print(f"    [Hard Reset {ps[0]}×{ps[1]}] {n_ambiguous}/{self.B_per_scale[scale_idx]} protos réinitialisés")
+        
+        if n_reset_total > 0:
+            print(f"  ✅ Total reset : {n_reset_total} prototypes ambigus")
 
     def get_vote_weights(self, scale_idx):
         total = self.class_counts[scale_idx].sum(dim=1, keepdim=True).clamp(min=1)
@@ -1021,7 +1072,7 @@ class TrainerMultiScale:
         self.device      = device
         self.num_classes = num_classes
 
-    def train_batch(self, images, labels, batch_size=2, lr=0.05):
+    def train_batch(self, images, labels, batch_size=2, lr=0.05, entropy_weight=0.1):
         images_t = torch.stack(images).to(self.device)
         labels_t = torch.tensor(labels, device=self.device, dtype=torch.long)
         
@@ -1031,44 +1082,10 @@ class TrainerMultiScale:
             if not any(a.any() for a in all_activated):
                 continue
             
-            # ✅ Version GPU vectorisée
+            # ✅ Gradient descent avec pénalité entropie
             self.population.update_batch_gradient_vectorized(
-                all_activated, all_z, labels_t[start:end], lr
+                all_activated, all_z, labels_t[start:end], lr, entropy_weight
             )
-
-
-
-
-    # def predict_batch(self, images, batch_size=4):
-    #     images_t = torch.stack(images).to(self.device)
-    #     all_preds = []
-        
-    #     for start in range(0, len(images_t), batch_size):
-    #         end = min(start + batch_size, len(images_t))
-    #         all_activated, _ = self.population.process_batch(images_t[start:end])
-            
-    #         for i in range(end - start):
-    #             total_votes = torch.zeros(self.num_classes, device=self.device)
-                
-    #             for scale_idx in range(self.population.n_scales):
-    #                 act_i = all_activated[scale_idx][i]
-    #                 valid = act_i & (self.population.proto_class[scale_idx] >= 0)
-                    
-    #                 if not valid.any():
-    #                     continue
-                    
-    #                 weights, freq = self.population.get_vote_weights(scale_idx)
-    #                 active_freq = freq[valid]
-    #                 active_weights = weights[valid]
-    #                 votes = (active_freq * active_weights.unsqueeze(1)).sum(dim=0)
-    #                 total_votes += votes
-                
-    #             if total_votes.sum() == 0:
-    #                 all_preds.append(None)
-    #             else:
-    #                 all_preds.append(total_votes.argmax().item())
-        
-    #     return all_preds
 
     def predict_batch(self, images, batch_size=4):
         images_t = torch.stack(images).to(self.device)
@@ -1084,28 +1101,23 @@ class TrainerMultiScale:
                 for scale_idx in range(self.population.n_scales):
                     act_i = all_activated[scale_idx][i]
                     
-                    # ✅ Filtrer : assignés + spécialisés
                     proto_class = self.population.proto_class[scale_idx]
                     _, freq = self.population.get_vote_weights(scale_idx)
                     
-                    # Spécialisation = freq pour sa propre classe
                     specialization = torch.zeros(len(proto_class), device=self.device)
                     for c in range(self.num_classes):
                         mask = proto_class == c
                         specialization[mask] = freq[mask, c]
                     
-                    # ✅ Seuil : seulement prototypes >75% spécialisés
                     highly_specialized = specialization > 0.75
                     valid = act_i & (proto_class >= 0) & highly_specialized
                     
                     if not valid.any():
                         continue
                     
-                    # ✅ Vote pondéré par spécialisation
                     active_freq = freq[valid]
                     active_spec = specialization[valid]
                     
-                    # Vote = fréquence × spécialisation
                     votes = (active_freq * active_spec.unsqueeze(1)).sum(dim=0)
                     total_votes += votes
                 
@@ -1115,5 +1127,3 @@ class TrainerMultiScale:
                     all_preds.append(total_votes.argmax().item())
         
         return all_preds
-
-#----------------------------------------------
