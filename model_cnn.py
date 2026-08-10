@@ -304,20 +304,16 @@ class GaborEncoder(nn.Module):
         features = self.conv(x)
         return torch.relu(features)
 
-
 class PopulationBMultiScaleGabor(PopulationBMultiScale):
-    """
-    EpitopeNet avec banc de filtres Gabor fixes.
-    Pas de pré-entraînement, paradigme sans gradient préservé.
-    """
     
     def __init__(self, num_cells, patch_sizes, theta_init, beta,
                  num_classes, K, use_intensity, device,
                  n_orientations=8, n_scales=4, gabor_kernel=11):
         
         self.n_gabor_filters = n_orientations * n_scales
+        self.gabor_patch     = (3, 3)  # ← patch sur feature map
         
-        # ── Gabor Encoder (fixe) ────────────────────────────
+        # ── Gabor Encoder (figé) ────────────────────────────
         self.encoder = GaborEncoder(
             n_orientations=n_orientations,
             n_scales=n_scales,
@@ -325,17 +321,17 @@ class PopulationBMultiScaleGabor(PopulationBMultiScale):
             device=device
         )
         
-        # ── Adapter patch_sizes ─────────────────────────────
-        # Image 256×256 → feature map 256×256 (padding=same)
-        # Patch sur feature map : même taille que l'original
-        
         print(f"[Gabor Encoder] {self.n_gabor_filters} filtres "
               f"({n_orientations} orientations × {n_scales} échelles)")
         
-        # ── Init parent ──────────────────────────────────────
+        # D_gabor = 3×3×n_gabor_filters = 9×32 = 288
+        D_gabor = self.gabor_patch[0] * self.gabor_patch[1] * self.n_gabor_filters
+        
+        # ── Init parent avec patch_sizes FICTIFS (juste pour B_per_scale) ──
+        # On passe patch_sizes original mais on overridera D après
         super().__init__(
             num_cells=num_cells,
-            patch_sizes=patch_sizes,  # Mêmes patch_sizes !
+            patch_sizes=patch_sizes,
             theta_init=theta_init,
             beta=beta,
             num_classes=num_classes,
@@ -344,62 +340,40 @@ class PopulationBMultiScaleGabor(PopulationBMultiScale):
             device=device
         )
         
-        # Override D : n_gabor_filters × ph × pw
-        for i, (ph, pw) in enumerate(patch_sizes):
-            D_new   = self.n_gabor_filters * ph * pw
+        # ── Override D pour chaque échelle → D_gabor ────────
+        for i in range(self.n_scales):
             B_scale = self.B_per_scale[i]
-            self.prototypes[i] = torch.randn(
-                B_scale, D_new, device=device) * 0.1
-            self.class_counts[i] = torch.zeros(
-                B_scale, num_classes, device=device)
-            print(f"  Échelle {i}: {ph}×{pw} Gabor patch → "
-                  f"{B_scale} protos, {D_new} features "
-                  f"({self.n_gabor_filters} canaux)")
+            self.prototypes[i]  = torch.randn(B_scale, D_gabor, device=device) * 0.1
+            self.class_counts[i] = torch.zeros(B_scale, num_classes, device=device)
+            print(f"  Échelle {i}: Gabor {self.gabor_patch[0]}×"
+                  f"{self.gabor_patch[1]} → {B_scale} protos, "
+                  f"{D_gabor} features ({self.n_gabor_filters} canaux)")
     
-    # def extract_patches_batch(self, images, patch_size):
-    #     """
-    #     Extraire patches sur feature map Gabor.
-    #     """
-    #     if images.dim() == 3:
-    #         images = images.unsqueeze(1)
-        
-    #     with torch.no_grad():
-    #         features = self.encoder(images)
-    #     # features : (N, n_filters, H, W)
-        
-    #     patches = F.unfold(
-    #         features,
-    #         kernel_size=patch_size,
-    #         stride=1
-    #     )
-    #     return patches.transpose(1, 2)
-    #     # shape : (N, P, n_filters × ph × pw)
-
     def extract_patches_batch(self, images, patch_size):
-        """Extraire patches sur feature map Gabor sous-échantillonnée."""
+        """
+        MODIFIÉ : Gabor → feature map 256×256 → sliding 3×3
+        patch_size original ignoré → on utilise self.gabor_patch
+        """
         if images.dim() == 3:
             images = images.unsqueeze(1)
         
+        # Gabor forward (figé, pas de gradient)
         with torch.no_grad():
             features = self.encoder(images)
-        # features : (N, n_filters, H, W)
+        # features : (N, n_gabor_filters, 256, 256)
         
-        # ← SOUS-ÉCHANTILLONNER pour réduire mémoire
-        features = F.avg_pool2d(features, kernel_size=4, stride=4)
-        # feature map : 256×256 → 64×64
-        
+        # Sliding window 3×3 sur feature map
         patches = F.unfold(
             features,
-            kernel_size=patch_size,
+            kernel_size=self.gabor_patch,
             stride=1
         )
         return patches.transpose(1, 2)
-
+        # shape : (N, P, 3×3×n_gabor_filters) = (N, ~65k, 288)
     
     def preprocess_patches(self, patches, keep_intensity=True):
-        """Z-score par patch sur features Gabor."""
+        """Z-score — identique au parent."""
         mean = patches.mean(dim=-1, keepdim=True)
         std  = patches.std(dim=-1, keepdim=True).clamp(min=1e-8)
         return (patches - mean) / std
-
 #
