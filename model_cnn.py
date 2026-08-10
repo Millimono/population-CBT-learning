@@ -308,12 +308,11 @@ class PopulationBMultiScaleGabor(PopulationBMultiScale):
     
     def __init__(self, num_cells, patch_sizes, theta_init, beta,
                  num_classes, K, use_intensity, device,
-                 n_orientations=8, n_scales=4, gabor_kernel=11):
+                 n_orientations=1, n_scales=1, gabor_kernel=11):
         
         self.n_gabor_filters = n_orientations * n_scales
-        self.gabor_patch     = (3, 3)  # ← patch sur feature map
         
-        # ── Gabor Encoder (figé) ────────────────────────────
+        # ── Gabor Encoder ───────────────────────────────────
         self.encoder = GaborEncoder(
             n_orientations=n_orientations,
             n_scales=n_scales,
@@ -321,14 +320,26 @@ class PopulationBMultiScaleGabor(PopulationBMultiScale):
             device=device
         )
         
+        # ── Adapter patch_size pour garder D ≈ original ─────
+        # D_original = ph × pw (ex: 18×18 = 324)
+        # D_gabor    = gabor_ph × gabor_pw × n_gabor_filters
+        # On veut D_gabor ≈ D_original
+        # → gabor_ph = sqrt(D_original / n_gabor_filters)
+
+        ph_orig, pw_orig = patch_sizes[0]
+        D_original = ph_orig * pw_orig
+        
+        import math
+        gabor_p = max(1, int(math.sqrt(D_original / self.n_gabor_filters)))
+        self.gabor_patch = (gabor_p, gabor_p)
+        D_gabor = gabor_p * gabor_p * self.n_gabor_filters
+        
         print(f"[Gabor Encoder] {self.n_gabor_filters} filtres "
-              f"({n_orientations} orientations × {n_scales} échelles)")
+              f"({n_orientations} orient × {n_scales} éch)")
+        print(f"[Patch adapté] {gabor_p}×{gabor_p} → D={D_gabor} "
+              f"(original D={D_original})")
         
-        # D_gabor = 3×3×n_gabor_filters = 9×32 = 288
-        D_gabor = self.gabor_patch[0] * self.gabor_patch[1] * self.n_gabor_filters
-        
-        # ── Init parent avec patch_sizes FICTIFS (juste pour B_per_scale) ──
-        # On passe patch_sizes original mais on overridera D après
+        # ── Init parent ──────────────────────────────────────
         super().__init__(
             num_cells=num_cells,
             patch_sizes=patch_sizes,
@@ -340,40 +351,35 @@ class PopulationBMultiScaleGabor(PopulationBMultiScale):
             device=device
         )
         
-        # ── Override D pour chaque échelle → D_gabor ────────
+        # ── Override D pour chaque échelle ───────────────────
         for i in range(self.n_scales):
             B_scale = self.B_per_scale[i]
-            self.prototypes[i]  = torch.randn(B_scale, D_gabor, device=device) * 0.1
-            self.class_counts[i] = torch.zeros(B_scale, num_classes, device=device)
-            print(f"  Échelle {i}: Gabor {self.gabor_patch[0]}×"
-                  f"{self.gabor_patch[1]} → {B_scale} protos, "
-                  f"{D_gabor} features ({self.n_gabor_filters} canaux)")
+            self.prototypes[i]   = torch.randn(
+                B_scale, D_gabor, device=device) * 0.1
+            self.class_counts[i] = torch.zeros(
+                B_scale, num_classes, device=device)
+            print(f"  Échelle {i}: Gabor {gabor_p}×{gabor_p} → "
+                  f"{B_scale} protos, D={D_gabor}")
     
     def extract_patches_batch(self, images, patch_size):
-        """
-        MODIFIÉ : Gabor → feature map 256×256 → sliding 3×3
-        patch_size original ignoré → on utilise self.gabor_patch
-        """
         if images.dim() == 3:
             images = images.unsqueeze(1)
         
-        # Gabor forward (figé, pas de gradient)
         with torch.no_grad():
             features = self.encoder(images)
         # features : (N, n_gabor_filters, 256, 256)
         
-        # Sliding window 3×3 sur feature map
         patches = F.unfold(
             features,
             kernel_size=self.gabor_patch,
             stride=1
         )
         return patches.transpose(1, 2)
-        # shape : (N, P, 3×3×n_gabor_filters) = (N, ~65k, 288)
     
     def preprocess_patches(self, patches, keep_intensity=True):
         """Z-score — identique au parent."""
         mean = patches.mean(dim=-1, keepdim=True)
         std  = patches.std(dim=-1, keepdim=True).clamp(min=1e-8)
         return (patches - mean) / std
+
 #
