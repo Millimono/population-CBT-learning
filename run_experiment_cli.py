@@ -19,11 +19,11 @@ from train     import run_experiment
 from save_load import save_model
 from run       import set_seed, TRAIN_DIR, VAL_DIR, DEVICE, NUM_CLASSES
 
-CACHE_CLEAN = "/data/shared/groups/IA4Covid/millimono/data_storage/miniddsm_val_clean_256.pt"
-DRIVE_PATH = "/data/shared/groups/IA4Covid/millimono/epitonet/results/"
+# CACHE_CLEAN = "/data/shared/groups/IA4Covid/millimono/data_storage/miniddsm_val_clean_256.pt"
+# DRIVE_PATH = "/data/shared/groups/IA4Covid/millimono/epitonet/results/"
 
-# CACHE_CLEAN = "/content/drive/MyDrive/MiniDDSM/miniddsm_val_clean_256.pt"
-# DRIVE_PATH  = "/content/drive/MyDrive/ablation_results/unified_runs/"
+CACHE_CLEAN = "/content/drive/MyDrive/MiniDDSM/miniddsm_val_clean_256.pt"
+DRIVE_PATH  = "/content/drive/MyDrive/ablation_results/unified_runs/"
 
 
 def parse_args():
