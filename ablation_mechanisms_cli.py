@@ -286,6 +286,10 @@ def run(args):
     shutil.copy(f"figs/{run_name}.json",
                 f"{DRIVE_PATH}{run_name}.json")
 
+    save_model(pop, path=f"figs/model_{run_name}.pt")
+    shutil.copy(f"figs/model_{run_name}.pt",
+                f"{DRIVE_PATH}model_{run_name}.pt")
+
     print(f"✅ Sauvegardé : {DRIVE_PATH}{run_name}.json")
     return best_acc, history
 
